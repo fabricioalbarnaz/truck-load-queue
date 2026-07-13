@@ -3,10 +3,10 @@
 <p>Logado como <strong><%= current_user.name %></strong> (<%= current_user.email %>)</p>
 <p>Papéis: <%= current_user.roles.map(&:name).join(", ").presence || "nenhum" %></p>
 
-<% if current_user.admin? || current_user.role?(:cadastro) %>
+<% if current_user.admin? || current_user.role?(:registration_operator) %>
   <nav>
-    <%= link_to "Motoristas", cadastro_drivers_path %>
-    <%= link_to "Caminhões", cadastro_trucks_path %>
+    <%= link_to "Motoristas", registration_drivers_path %>
+    <%= link_to "Caminhões", registration_trucks_path %>
   </nav>
 <% end %>
 

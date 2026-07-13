@@ -227,10 +227,55 @@ Rails level) while the model still returns plaintext.
 
 ---
 
+## Role key rename — Portuguese → English identifiers
+
+After Phase 2 shipped, the `Role::KEYS` values and everything derived from
+them were renamed from Portuguese to English, since role keys are code
+identifiers, not user-facing text (the `name` column — e.g. "Operador de
+Cadastro" — stays pt-BR, since that *is* user-facing):
+
+| Old key | New key |
+|---|---|
+| `cadastro` | `registration_operator` |
+| `expedicao` | `expedition_operator` |
+| `fila` | `queue_operator` |
+| `admin` | `admin` (unchanged) |
+
+Everything mirroring these names was renamed to match, since leaving the
+namespaces in Portuguese while the role keys were in English would have
+been inconsistent:
+
+- `Role::KEYS` (`app/models/role.rb`) and `db/seeds.rb`'s `ROLES` hash keys.
+- The `Cadastro::` namespace → `Registration::` — `app/controllers/registration/`,
+  `app/views/registration/`, `spec/requests/registration/`, and the
+  `namespace :registration` route (was `:cadastro`). Path helpers changed
+  accordingly (`registration_drivers_path`, etc).
+- `DriverPolicy`/`TruckPolicy`'s private `cadastro_or_admin?` helper →
+  `registration_or_admin?`.
+- All `role?(:cadastro)` / `role?(:fila)` call sites and spec factory trait
+  references (`create(:role, :cadastro)` → `create(:role, :registration_operator)`, etc — the traits are auto-generated
+  from `Role::KEYS` in `spec/factories/roles.rb`, so no factory file change
+  was needed beyond the model).
+- `docs/plan.md` (the architecture reference) was updated throughout —
+  state machine table, file structure, build-phase descriptions — so it
+  stays authoritative for the still-unbuilt `Expedicao::`/`Fila::`
+  controllers, which are now planned as `Expedition::`/`Queue::`.
+- **Data migration**: `db/migrate/20260713215625_rename_role_keys_to_english.rb`
+  does an `UPDATE roles SET key = ... WHERE key = ...` for the 3 renamed
+  keys (reversible), since the dev/test databases already had rows seeded
+  with the old Portuguese keys from Phase 2's manual verification — a
+  plain code change wouldn't have touched existing rows and `Role::KEYS`'
+  inclusion validation would have started rejecting the old values.
+
+Verified: `bundle exec rspec` (55 examples, 0 failures) after the migration
+ran in both `development` and `test`.
+
+---
+
 ## Next step
 
 **Phase 3** — Yard check-in: `Visit` model + `CheckInService` + yard
-listing, restricted to the `cadastro` role. This is also where
+listing, restricted to the `registration_operator` role. This is also where
 `DriverTruck#active` soft-disable semantics should be revisited (see
 deviation note above) when the check-in service upserts pairs. See details
 in [`docs/plan.md`](plan.md#build-phases-incremental-milestones).

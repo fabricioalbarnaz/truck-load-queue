@@ -6,5 +6,5 @@
 <p><strong>Ativo:</strong> <%= @driver.active? ? "Sim" : "Não" %></p>
 <p><strong>Caminhões:</strong> <%= @driver.trucks.map(&:plate).join(", ").presence || "nenhum" %></p>
 
-<%= link_to "Editar", edit_cadastro_driver_path(@driver) %>
-<%= link_to "Voltar", cadastro_drivers_path %>
+<%= link_to "Editar", edit_registration_driver_path(@driver) %>
+<%= link_to "Voltar", registration_drivers_path %>

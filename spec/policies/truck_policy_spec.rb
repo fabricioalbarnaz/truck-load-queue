@@ -3,13 +3,13 @@ require "rails_helper"
 RSpec.describe TruckPolicy do
   subject { described_class }
 
-  let(:cadastro_user) { create(:user).tap { |u| u.roles << create(:role, :cadastro) } }
+  let(:registration_user) { create(:user).tap { |u| u.roles << create(:role, :registration_operator) } }
   let(:admin_user) { create(:user).tap { |u| u.roles << create(:role, :admin) } }
-  let(:other_user) { create(:user).tap { |u| u.roles << create(:role, :fila) } }
+  let(:other_user) { create(:user).tap { |u| u.roles << create(:role, :queue_operator) } }
 
   permissions :index?, :show?, :create?, :update?, :destroy? do
-    it "grants access to cadastro" do
-      expect(subject).to permit(cadastro_user, Truck)
+    it "grants access to a registration operator" do
+      expect(subject).to permit(registration_user, Truck)
     end
 
     it "grants access to admin" do

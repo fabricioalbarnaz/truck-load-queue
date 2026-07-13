@@ -1,4 +1,4 @@
-module Cadastro
+module Registration
   class TrucksController < BaseController
     before_action :set_truck, only: %i[show edit update destroy]
 
@@ -21,7 +21,7 @@ module Cadastro
       authorize @truck
 
       if @truck.save
-        redirect_to cadastro_truck_path(@truck), notice: "Caminhão cadastrado com sucesso."
+        redirect_to registration_truck_path(@truck), notice: "Caminhão cadastrado com sucesso."
       else
         render :new, status: :unprocessable_entity
       end
@@ -35,7 +35,7 @@ module Cadastro
       authorize @truck
 
       if @truck.update(truck_params)
-        redirect_to cadastro_truck_path(@truck), notice: "Caminhão atualizado com sucesso."
+        redirect_to registration_truck_path(@truck), notice: "Caminhão atualizado com sucesso."
       else
         render :edit, status: :unprocessable_entity
       end
@@ -44,7 +44,7 @@ module Cadastro
     def destroy
       authorize @truck
       @truck.destroy
-      redirect_to cadastro_trucks_path, notice: "Caminhão removido com sucesso."
+      redirect_to registration_trucks_path, notice: "Caminhão removido com sucesso."
     end
 
     private

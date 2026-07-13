@@ -69,8 +69,9 @@ volume instead of mounting the host directory. If running raw `docker run` comma
 - **Auth**: Devise on `User`, `:registerable` intentionally disabled — users are only created by
   an admin through Avo, never self-signup. Roles are a separate `Role`/`UserRole` N:N (not Devise
   roles or a gem like rolify) — `Role::KEYS` in `app/models/role.rb` is the source of truth for
-  valid role keys (`admin`, `cadastro`, `expedicao`, `fila`). Use `user.role?(:key)` /
-  `user.admin?`, not direct association queries.
+  valid role keys (`admin`, `registration_operator`, `expedition_operator`, `queue_operator` —
+  English identifiers; the `name` column stays pt-BR since it's user-facing). Use
+  `user.role?(:key)` / `user.admin?`, not direct association queries.
 - **Authorization**: Pundit. `ApplicationPolicy` denies by default (`false`); every real policy
   must explicitly allow. Avo (admin panel, not yet mounted) will integrate via
   `authorization_client = :pundit` with remapped action names (`avo_index?`, `avo_update?`, etc.)

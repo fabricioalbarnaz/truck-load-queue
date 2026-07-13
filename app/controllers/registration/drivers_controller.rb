@@ -1,4 +1,4 @@
-module Cadastro
+module Registration
   class DriversController < BaseController
     before_action :set_driver, only: %i[show edit update destroy]
 
@@ -21,7 +21,7 @@ module Cadastro
       authorize @driver
 
       if @driver.save
-        redirect_to cadastro_driver_path(@driver), notice: "Motorista cadastrado com sucesso."
+        redirect_to registration_driver_path(@driver), notice: "Motorista cadastrado com sucesso."
       else
         render :new, status: :unprocessable_entity
       end
@@ -35,7 +35,7 @@ module Cadastro
       authorize @driver
 
       if @driver.update(driver_params)
-        redirect_to cadastro_driver_path(@driver), notice: "Motorista atualizado com sucesso."
+        redirect_to registration_driver_path(@driver), notice: "Motorista atualizado com sucesso."
       else
         render :edit, status: :unprocessable_entity
       end
@@ -44,7 +44,7 @@ module Cadastro
     def destroy
       authorize @driver
       @driver.destroy
-      redirect_to cadastro_drivers_path, notice: "Motorista removido com sucesso."
+      redirect_to registration_drivers_path, notice: "Motorista removido com sucesso."
     end
 
     private

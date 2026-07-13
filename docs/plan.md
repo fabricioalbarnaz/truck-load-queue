@@ -20,7 +20,7 @@ This is a greenfield project in `D:\Sites`, currently empty — there is no exis
 | Real-time | Turbo Streams / ActionCable (Rails-native, no polling) |
 | Individual notifications | SMS **and** WhatsApp via Twilio, configurable per driver (`sms`/`whatsapp`/`both`) |
 | Admin panel | **Avo** gem (~> 3.x), authorization via Pundit |
-| Auth/Roles | Single `User` model (Devise) + `Role`/`UserRole` (N:N) — roles: `admin`, `cadastro` (registration), `expedicao` (dispatch), `fila` (queue) |
+| Auth/Roles | Single `User` model (Devise) + `Role`/`UserRole` (N:N) — roles: `admin`, `registration_operator` (registration), `expedition_operator` (dispatch), `queue_operator` (queue) |
 | Driver↔Truck link | Fixed N:N registration (`DriverTruck`), and each visit (`Visit`) records which truck was used on that occasion |
 | Queue order | Simple FIFO by order-issuance timestamp (`order_issued_at`) — no manual reordering |
 | Yard check-in | Separate action from registration (a driver may visit the mine multiple times over time) |
@@ -53,7 +53,7 @@ Visit  >── User (checked_in_by / order_issued_by / finished_by)
 ```
 
 - **`users`**: standard Devise + `name`. No `:registerable`.
-- **`roles`**: `key` (admin/cadastro/expedicao/fila), `name`. Seeded in `db/seeds.rb`.
+- **`roles`**: `key` (admin/registration_operator/expedition_operator/queue_operator), `name`. Seeded in `db/seeds.rb`.
 - **`user_roles`**: join table, unique index `[user_id, role_id]`.
 - **`drivers`**: `name`, `cpf` (encrypted, unique, validated via `cpf_cnpj`), `phone` (encrypted, E.164 via `phonelib`), `notification_channel` enum (`sms`/`whatsapp`/`both`), `active`.
 - **`trucks`**: `plate` (unique, uppercase), `model`, `capacity`, `active`.
@@ -77,9 +77,9 @@ If an operator registers a driver+truck combination that doesn't yet exist in `d
 
 | Transition | Trigger | Role | Service |
 |---|---|---|---|
-| — → `in_yard` | Yard check-in | `cadastro` | `Visits::CheckInService` |
-| `in_yard` → `queued` or `loading` | Order issuance | `expedicao` | `Visits::IssueOrderService` |
-| `loading` → `finished` | Loading finished | `fila` | `Visits::FinishLoadingService` |
+| — → `in_yard` | Yard check-in | `registration_operator` | `Visits::CheckInService` |
+| `in_yard` → `queued` or `loading` | Order issuance | `expedition_operator` | `Visits::IssueOrderService` |
+| `loading` → `finished` | Loading finished | `queue_operator` | `Visits::FinishLoadingService` |
 | `queued` → `loading` (next) | Automatic | system | `Visits::PromoteNextService` |
 
 There is no manual "start loading" button: when an order is issued, if the queue is empty the visit goes straight to `loading` (it's already the truck's turn); otherwise it becomes `queued`. When finished, `PromoteNextService` promotes the next `queued` visit by `order_issued_at` to `loading`.
@@ -119,7 +119,7 @@ app/jobs/send_notification_job.rb
 ## Authorization (Pundit) + Avo
 
 - `ApplicationPolicy` base with an `admin?` helper.
-- `VisitPolicy` with domain actions: `check_in?` (cadastro), `issue_order?` (expedicao), `finish?` (fila), always also allowed for `admin`.
+- `VisitPolicy` with domain actions: `check_in?` (registration_operator), `issue_order?` (expedition_operator), `finish?` (queue_operator), always also allowed for `admin`.
 - Avo 3 integrates natively with Pundit (`authorization_client = :pundit`). Methods are remapped (`avo_index?`, `avo_update?`, etc.) to avoid colliding with the domain actions on the policies — only `admin` can reach `/admin`, with a double gate: `authenticate_with` at the mount point + per-resource policy.
 - `UserResource` in Avo exposes `roles` assignment (multi-select field) — this is the requested "permission management."
 
@@ -150,11 +150,11 @@ app/services/visits/{check_in,issue_order,finish_loading,promote_next}_service.r
 app/services/notifications/{dispatcher,notify_driver_service}.rb
 app/services/notifications/adapters/{base,twilio_sms,twilio_whatsapp,test}_adapter.rb
 app/jobs/send_notification_job.rb
-app/controllers/cadastro/{drivers,trucks,visits}_controller.rb
-app/controllers/expedicao/visits_controller.rb
-app/controllers/fila/visits_controller.rb
+app/controllers/registration/{drivers,trucks,visits}_controller.rb
+app/controllers/expedition/visits_controller.rb
+app/controllers/queue/visits_controller.rb
 app/controllers/public/queue_controller.rb
-app/views/{cadastro,expedicao,fila,public}/**/*.html.erb
+app/views/{registration,expedition,queue,public}/**/*.html.erb
 app/assets/stylesheets/tokens.css, application.css, components/*.css
 app/avo/resources/{user,role,driver,truck,driver_truck,visit}_resource.rb
 config/initializers/{devise,avo,twilio,sidekiq}.rb
@@ -183,10 +183,10 @@ As part of Phase 1, a `docs/` folder is created at the project root containing:
 ## Build phases (incremental milestones)
 
 1. **Skeleton**: `git init`, create `docs/plan.md` (this file), `rails new` (Postgres, plain CSS), working Docker/compose, Devise + Pundit, `User`/`Role`/`UserRole` models, seed roles + admin, default locale pt-BR. *Verify*: boots via `docker compose up`, admin can log in, `git log` shows the initial history.
-2. **Driver/Truck registration**: `Driver`, `Truck`, `DriverTruck` models + policies + `Cadastro::DriversController`/`TrucksController` + views. *Verify*: a `cadastro` operator can CRUD; other roles get a 302.
+2. **Driver/Truck registration**: `Driver`, `Truck`, `DriverTruck` models + policies + `Registration::DriversController`/`TrucksController` + views. *Verify*: a `registration_operator` can CRUD; other roles get a 302.
 3. **Yard check-in**: `Visit` + `CheckInService` + yard listing. *Verify*: check-in creates an `in_yard` visit; duplicates are blocked.
-4. **Dispatch screen**: `IssueOrderService`, `Expedicao::VisitsController` (yard + queue view). *Verify*: empty queue → `loading`; non-empty queue → `queued`, correct order.
-5. **Queue screen**: `FinishLoadingService` + `PromoteNextService`, `Fila::VisitsController`. *Verify*: finishing promotes the correct next visit by `order_issued_at`.
+4. **Dispatch screen**: `IssueOrderService`, `Expedition::VisitsController` (yard + queue view). *Verify*: empty queue → `loading`; non-empty queue → `queued`, correct order.
+5. **Queue screen**: `FinishLoadingService` + `PromoteNextService`, `Queue::VisitsController`. *Verify*: finishing promotes the correct next visit by `order_issued_at`.
 6. **Public real-time screen**: `Public::QueueController` + Turbo Streams broadcast. *Verify*: two open tabs, an action in one reflects in the other without a refresh.
 7. **Notifications**: Dispatcher + adapters + Sidekiq job, fired when entering `loading`. *Verify*: `TestAdapter` logs in dev; VCR-backed specs pass without hitting the real network.
 8. **Avo admin panel**: resources for all 6 models, Pundit integration, role assignment. *Verify*: a non-admin is redirected away from `/admin`; an admin can create a user and assign a role.
@@ -209,7 +209,7 @@ As part of Phase 1, a `docs/` folder is created at the project root containing:
 ## End-to-end verification
 
 - `docker compose up` brings up `web`, `worker`, `db`, `redis` with no errors.
-- Log in as each role (`cadastro`, `expedicao`, `fila`, `admin`) and confirm access only to the screens allowed for that role.
+- Log in as each role (`registration_operator`, `expedition_operator`, `queue_operator`, `admin`) and confirm access only to the screens allowed for that role.
 - Full manual flow: register driver+truck → yard check-in → issue order (dispatch) → confirm the public screen updates live → finish loading (queue) → confirm automatic promotion of the next truck and the "TestAdapter" notification firing in the logs.
 - `bundle exec rspec` (inside the container) with the whole suite green.
 - Visit `/admin`, create a new user and assign a role, confirm they can log in to the corresponding screen.

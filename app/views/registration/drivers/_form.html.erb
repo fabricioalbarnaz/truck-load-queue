@@ -1,4 +1,4 @@
-<%= form_with model: driver, url: (driver.persisted? ? cadastro_driver_path(driver) : cadastro_drivers_path) do |form| %>
+<%= form_with model: driver, url: (driver.persisted? ? registration_driver_path(driver) : registration_drivers_path) do |form| %>
   <% if driver.errors.any? %>
     <div class="error-messages">
       <h2><%= pluralize(driver.errors.count, "erro") %> impede(m) o salvamento:</h2>

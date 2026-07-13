@@ -1,6 +1,6 @@
 <h1>Caminhões</h1>
 
-<p><%= link_to "Novo caminhão", new_cadastro_truck_path %></p>
+<p><%= link_to "Novo caminhão", new_registration_truck_path %></p>
 
 <table>
   <thead>
@@ -15,13 +15,13 @@
   <tbody>
     <% @trucks.each do |truck| %>
       <tr>
-        <td><%= link_to truck.plate, cadastro_truck_path(truck) %></td>
+        <td><%= link_to truck.plate, registration_truck_path(truck) %></td>
         <td><%= truck.model %></td>
         <td><%= truck.capacity %></td>
         <td><%= truck.active? ? "Sim" : "Não" %></td>
         <td>
-          <%= link_to "Editar", edit_cadastro_truck_path(truck) %>
-          <%= button_to "Remover", cadastro_truck_path(truck), method: :delete, form: { data: { turbo_confirm: "Remover este caminhão?" } } %>
+          <%= link_to "Editar", edit_registration_truck_path(truck) %>
+          <%= button_to "Remover", registration_truck_path(truck), method: :delete, form: { data: { turbo_confirm: "Remover este caminhão?" } } %>
         </td>
       </tr>
     <% end %>

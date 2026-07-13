@@ -1,6 +1,6 @@
 <h1>Motoristas</h1>
 
-<p><%= link_to "Novo motorista", new_cadastro_driver_path %></p>
+<p><%= link_to "Novo motorista", new_registration_driver_path %></p>
 
 <table>
   <thead>
@@ -14,12 +14,12 @@
   <tbody>
     <% @drivers.each do |driver| %>
       <tr>
-        <td><%= link_to driver.name, cadastro_driver_path(driver) %></td>
+        <td><%= link_to driver.name, registration_driver_path(driver) %></td>
         <td><%= driver.notification_channel %></td>
         <td><%= driver.active? ? "Sim" : "Não" %></td>
         <td>
-          <%= link_to "Editar", edit_cadastro_driver_path(driver) %>
-          <%= button_to "Remover", cadastro_driver_path(driver), method: :delete, form: { data: { turbo_confirm: "Remover este motorista?" } } %>
+          <%= link_to "Editar", edit_registration_driver_path(driver) %>
+          <%= button_to "Remover", registration_driver_path(driver), method: :delete, form: { data: { turbo_confirm: "Remover este motorista?" } } %>
         </td>
       </tr>
     <% end %>

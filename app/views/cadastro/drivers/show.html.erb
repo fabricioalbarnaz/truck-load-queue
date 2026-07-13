@@ -1,0 +1,10 @@
+<h1><%= @driver.name %></h1>
+
+<p><strong>CPF:</strong> <%= @driver.cpf %></p>
+<p><strong>Telefone:</strong> <%= @driver.phone %></p>
+<p><strong>Canal de notificação:</strong> <%= @driver.notification_channel %></p>
+<p><strong>Ativo:</strong> <%= @driver.active? ? "Sim" : "Não" %></p>
+<p><strong>Caminhões:</strong> <%= @driver.trucks.map(&:plate).join(", ").presence || "nenhum" %></p>
+
+<%= link_to "Editar", edit_cadastro_driver_path(@driver) %>
+<%= link_to "Voltar", cadastro_drivers_path %>

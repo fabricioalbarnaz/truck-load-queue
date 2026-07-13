@@ -1,0 +1,6 @@
+<h1>Fila de Carregamento</h1>
+
+<p>Logado como <strong><%= current_user.name %></strong> (<%= current_user.email %>)</p>
+<p>Papéis: <%= current_user.roles.map(&:name).join(", ").presence || "nenhum" %></p>
+
+<%= button_to "Sair", destroy_user_session_path, method: :delete %>

@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1
+# Development image: installs all gem groups (including test) and runs with
+# the source mounted as a volume for fast iteration. Not used in production —
+# see Dockerfile for the production build.
+ARG RUBY_VERSION=3.3.11
+FROM docker.io/library/ruby:$RUBY_VERSION-slim
+
+RUN apt-get update -qq && \
+    apt-get install --no-install-recommends -y \
+      build-essential git libpq-dev pkg-config curl libjemalloc2 libvips \
+      chromium chromium-driver postgresql-client && \
+    rm -rf /var/lib/apt/lists /var/cache/apt/archives
+
+WORKDIR /rails
+
+COPY Gemfile Gemfile.lock ./
+RUN bundle install
+
+COPY . .
+
+EXPOSE 3000
+CMD ["./bin/dev"]

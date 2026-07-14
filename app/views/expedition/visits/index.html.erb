@@ -1,0 +1,47 @@
+<h1>Painel de expedição</h1>
+
+<h2>Pátio</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Motorista</th>
+      <th>Caminhão</th>
+      <th>Entrada no pátio</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @yard_visits.each do |visit| %>
+      <tr>
+        <td><%= visit.driver.name %></td>
+        <td><%= visit.truck.plate %></td>
+        <td><%= visit.entered_yard_at.strftime("%d/%m/%Y %H:%M") %></td>
+        <td><%= button_to "Emitir ordem", issue_order_expedition_visit_path(visit), method: :patch %></td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>
+
+<h2>Fila</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Posição</th>
+      <th>Motorista</th>
+      <th>Caminhão</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @queue_visits.each do |visit| %>
+      <tr>
+        <td><%= visit.loading? ? "-" : visit.queue_position %></td>
+        <td><%= visit.driver.name %></td>
+        <td><%= visit.truck.plate %></td>
+        <td><%= visit.loading? ? "Carregando" : "Na fila" %></td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>

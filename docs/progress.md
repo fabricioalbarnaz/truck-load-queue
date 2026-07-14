@@ -15,7 +15,7 @@ the design reference.
 | 1 | Skeleton (Rails + Docker + Devise + Pundit + Roles) | ✅ Done |
 | 2 | Driver/truck registration | ✅ Done |
 | 3 | Yard check-in (`Visit` model) | ✅ Done |
-| 4 | Dispatch screen (order issuance) | ⏳ Not started |
+| 4 | Dispatch screen (order issuance) | ✅ Done |
 | 5 | Queue screen (finish loading) | ⏳ Not started |
 | 6 | Public real-time screen (Turbo Streams) | ⏳ Not started |
 | 7 | Notifications (SMS/WhatsApp via Twilio) | ⏳ Not started |
@@ -359,12 +359,86 @@ the model validation, not just a service-level check); signed in as a
 
 ---
 
+## Phase 4 — Dispatch screen (done)
+
+### What was created
+
+- **`Visits::IssueOrderService`** (`app/services/visits/issue_order_service.rb`):
+  given a `visit:` (expected to be `in_yard`) and `order_issued_by:`, sets
+  `order_issued_at`/`order_issued_by` and decides the resulting status —
+  `loading` (plus `loading_started_at`) if no other visit is currently
+  `queued`/`loading`, otherwise `queued`. The "queue empty?" check excludes
+  the visit's own id via `where.not(id: ...)`, though in practice an
+  `in_yard` visit can never already match `%w[queued loading]` itself — kept
+  for symmetry with `Visit`'s own active-visit validations rather than out of
+  strict necessity. Returns the (possibly invalid) visit, same convention as
+  `CheckInService`.
+- **`VisitPolicy#issue_order?`**: added exactly as flagged as deferred in the
+  Phase 3 log — `expedition_or_admin?`. The `Scope` was broadened from
+  registration-only to any of the three operator roles (`registration_operator`/
+  `expedition_operator`/`queue_operator`) or admin, since `Visit` records are
+  now read by a second screen; per-action gating (`index?`/`issue_order?`)
+  still restricts who can reach each controller, so this didn't loosen any
+  existing access.
+- **`Expedition::BaseController`** (mirrors `Registration::BaseController`,
+  just `authenticate_user!`) and **`Expedition::VisitsController`**:
+  - `index`: authorizes via the domain action (`authorize Visit,
+    :issue_order?`, not generic `index?`) — deliberately reusing
+    `issue_order?` for both viewing the dispatch screen and triggering it,
+    since this app has one screen per role and no finer-grained permission
+    is needed yet (matches `docs/plan.md`'s "3 domain actions total" model).
+    Loads `@yard_visits` (`in_yard`, ordered by `entered_yard_at`) and
+    `@queue_visits` (`Visit.active_queue`, i.e. `queued`+`loading` ordered by
+    `order_issued_at`).
+  - `issue_order` (member action, `PATCH /expedition/visits/:id/issue_order`):
+    same domain-action authorization, looks the visit up scoped to
+    `Visit.in_yard` (so a stale/re-submitted request can't re-issue an order
+    for an already-dispatched visit), delegates to the service, redirects
+    with a notice/alert depending on `result.errors.empty?`.
+- **Routes**: `namespace :expedition do resources :visits, only: [:index] do
+  member { patch :issue_order } end end`.
+- **View**: `app/views/expedition/visits/index.html.erb` — yard table with a
+  `button_to ... method: :patch` per row, plus a queue table showing
+  position (`queue_position`, or "-" while `loading`) and status.
+- Specs: `spec/services/visits/issue_order_service_spec.rb` (empty queue →
+  `loading` + timestamps; non-empty queue via an existing `:loading` or
+  `:queued` visit → `queued`); `issue_order?` permissions block added to
+  `spec/policies/visit_policy_spec.rb`; `spec/requests/expedition/visits_spec.rb`
+  (index: unauthenticated/wrong-role/authorized; issue_order: transitions to
+  `loading`, queues behind an existing `loading` visit, wrong role leaves the
+  visit untouched).
+
+### Deviations / gotchas discovered during execution
+
+- **Manual curl-based verification hit a CSRF wall unrelated to this
+  phase's code**: `curl` round-tripping the authenticity token (GET the
+  form → extract token → POST/PATCH with it, cookies persisted via
+  `-b`/`-c`) consistently got `422 InvalidAuthenticityToken` — reproduced
+  identically against the pre-existing, already-working
+  `Registration::VisitsController#create`, so it's a quirk of this manual
+  curl approach (likely the masked-token/session-cookie handshake) and not
+  a defect in the new controller. Verified the actual behavior instead via
+  (a) `curl` GET of `/expedition/visits` (200, correct HTML/data/button
+  URLs) and (b) `Visits::IssueOrderService` invoked directly in `bin/rails
+  runner` against the live dev DB — confirmed empty-queue → `loading` and
+  second-visit → `queued` at position 1 — plus the full request-spec suite,
+  which exercises the same PATCH path correctly via Rails' own (non-curl)
+  integration test session.
+
+### How to verify
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 97 examples, 0 failures
+docker compose run --rm web bin/rubocop                          # clean except pre-existing Phase 1 offenses
+docker compose run --rm web bin/brakeman -q                      # 0 warnings
+```
+
 ## Next step
 
-**Phase 4** — Dispatch screen: `IssueOrderService`,
-`Expedition::VisitsController` (yard + queue view), restricted to the
-`expedition_operator` role. This is where `VisitPolicy#issue_order?` should
-finally be added (see the Phase 3 deviation note on deliberately not
-pre-adding it). *Verify*: empty queue → visit goes straight to `loading`;
-non-empty queue → `queued`, correct FIFO order. See details in
+**Phase 5** — Queue screen: `Visits::FinishLoadingService` +
+`Visits::PromoteNextService`, `Queue::VisitsController`, restricted to the
+`queue_operator` role. This is where `VisitPolicy#finish?` should finally be
+added (last of the three domain actions). *Verify*: finishing a `loading`
+visit promotes the correct next `queued` visit (by `order_issued_at`, not
+creation order) to `loading`. See details in
 [`docs/plan.md`](plan.md#build-phases-incremental-milestones).

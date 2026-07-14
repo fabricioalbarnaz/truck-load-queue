@@ -9,15 +9,20 @@ class VisitPolicy < ApplicationPolicy
     registration_or_admin?
   end
 
+  def issue_order?
+    expedition_or_admin?
+  end
+
   class Scope < Scope
     def resolve
-      registration_or_admin? ? scope.all : scope.none
+      operator_or_admin? ? scope.all : scope.none
     end
 
     private
 
-    def registration_or_admin?
-      user&.admin? || user&.role?(:registration_operator)
+    def operator_or_admin?
+      user&.admin? || user&.role?(:registration_operator) || user&.role?(:expedition_operator) ||
+        user&.role?(:queue_operator)
     end
   end
 
@@ -25,5 +30,9 @@ class VisitPolicy < ApplicationPolicy
 
   def registration_or_admin?
     user&.admin? || user&.role?(:registration_operator)
+  end
+
+  def expedition_or_admin?
+    user&.admin? || user&.role?(:expedition_operator)
   end
 end

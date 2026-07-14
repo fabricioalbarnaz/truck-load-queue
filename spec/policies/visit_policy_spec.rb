@@ -64,4 +64,12 @@ RSpec.describe VisitPolicy do
       expect(subject).not_to permit(nil, Visit)
     end
   end
+
+  permissions :avo_index?, :avo_show?, :avo_create?, :avo_update?, :avo_destroy? do
+    it "grants access to admin only, not other operator roles" do
+      expect(subject).to permit(admin_user, Visit)
+      expect(subject).not_to permit(registration_user, Visit)
+      expect(subject).not_to permit(expedition_user, Visit)
+    end
+  end
 end

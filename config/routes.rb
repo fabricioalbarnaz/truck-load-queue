@@ -4,6 +4,8 @@ Rails.application.routes.draw do
 
   mount ActionCable.server => "/cable"
 
+  mount_avo
+
   namespace :registration do
     resources :drivers
     resources :trucks

@@ -1,0 +1,25 @@
+<div id="public_queue">
+  <h1>Fila de carregamento</h1>
+
+  <section>
+    <h2>Carregando agora</h2>
+    <% if loading %>
+      <p><%= loading.driver.name %> — <%= loading.truck.plate %></p>
+    <% else %>
+      <p>Nenhum caminhão carregando no momento.</p>
+    <% end %>
+  </section>
+
+  <section>
+    <h2>Próximos</h2>
+    <% if queued.any? %>
+      <ol>
+        <% queued.each do |visit| %>
+          <li><%= visit.driver.name %> — <%= visit.truck.plate %></li>
+        <% end %>
+      </ol>
+    <% else %>
+      <p>Fila vazia.</p>
+    <% end %>
+  </section>
+</div>

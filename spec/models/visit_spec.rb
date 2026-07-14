@@ -67,4 +67,29 @@ RSpec.describe Visit, type: :model do
       expect(third.queue_position).to eq(3)
     end
   end
+
+  describe "public queue broadcast" do
+    it "does not broadcast on check-in (in_yard creation)" do
+      expect(Turbo::StreamsChannel).not_to receive(:broadcast_replace_to)
+      create(:visit)
+    end
+
+    it "broadcasts to public_queue when a visit becomes queued" do
+      visit = create(:visit)
+
+      expect(Turbo::StreamsChannel).to receive(:broadcast_replace_to)
+        .with("public_queue", hash_including(target: "public_queue", partial: "public/queue/board"))
+
+      visit.update(status: :queued, order_issued_at: Time.current)
+    end
+
+    it "broadcasts when a visit finishes" do
+      visit = create(:visit, :loading)
+
+      expect(Turbo::StreamsChannel).to receive(:broadcast_replace_to)
+        .with("public_queue", hash_including(target: "public_queue"))
+
+      visit.update(status: :finished, finished_at: Time.current)
+    end
+  end
 end

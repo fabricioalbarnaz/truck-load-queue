@@ -17,7 +17,7 @@ the design reference.
 | 3 | Yard check-in (`Visit` model) | ✅ Done |
 | 4 | Dispatch screen (order issuance) | ✅ Done |
 | 5 | Queue screen (finish loading) | ✅ Done |
-| 6 | Public real-time screen (Turbo Streams) | ⏳ Not started |
+| 6 | Public real-time screen (Turbo Streams) | ✅ Done |
 | 7 | Notifications (SMS/WhatsApp via Twilio) | ⏳ Not started |
 | 8 | Admin panel (Avo) | ⏳ Not started |
 | 9 | Test coverage + styling | ⏳ Not started |
@@ -505,10 +505,98 @@ returned 200 with the correct "Painel de fila" page showing the newly
 promoted visit and a properly-formed `finish` form action
 (`/queue/visits/3/finish`).
 
+## Phase 6 — Public real-time screen (done)
+
+### What was created
+
+- **Importmap/Turbo/Stimulus were never actually wired up before this
+  phase**, despite `turbo-rails`/`stimulus-rails`/`importmap-rails` being in
+  the Gemfile since Phase 1: no `config/importmap.rb`, no
+  `app/javascript/application.js`, no `javascript_importmap_tags` in the
+  layout. Harmless until now since no phase needed client-side JS, but
+  required for Turbo Streams to actually process incoming broadcasts in the
+  browser. Ran the standard generators (`bin/rails importmap:install`,
+  `turbo:install`, `stimulus:install`) to add all of the above plus
+  `app/javascript/controllers/{index,application}.js`; deleted the generated
+  `hello_controller.js` demo stub (unused).
+- **`Visit` model**: added `PUBLIC_QUEUE_RELEVANT_STATUSES = %w[queued
+  loading finished]` and an `after_commit :broadcast_public_queue!, if:
+  :queue_relevant_change?`(private method `public_queue_relevant_change?`,
+  checking `saved_change_to_status?` plus old/new status membership in that
+  list). A check-in (`in_yard` creation) does **not** broadcast — only
+  transitions into/out of `queued`/`loading`/`finished` do, since those are
+  the only ones the public board's content depends on. `broadcast_public_queue!`
+  calls `Turbo::StreamsChannel.broadcast_replace_to("public_queue", target:
+  "public_queue", partial: "public/queue/board", locals: { loading:
+  Visit.loading.first, queued: Visit.active_queue.queued })` exactly as
+  specified in `docs/plan.md`.
+- **`Public::QueueController#show`** (no `BaseController`/`authenticate_user!`
+  — genuinely public, and there's only one action so a shared base class
+  would be pure boilerplate): loads `@loading`/`@queued` the same way the
+  model's broadcast does.
+- **Route**: `namespace :public do resource :queue, only: [:show], controller:
+  "queue" end` — a *singular* `resource` still defaults to a pluralized
+  controller name (`public/queues`) unless `controller:` is given explicitly;
+  first attempt 404'd until this was added. Also added `mount
+  ActionCable.server => "/cable"` to `routes.rb`, which had never been
+  present (needed for the browser's Turbo/ActionCable consumer to open the
+  websocket connection — everything else Turbo-related is silent without
+  it).
+- **Views**: `app/views/public/queue/show.html.erb` (`turbo_stream_from
+  "public_queue"` + renders the partial) and `_board.html.erb` (root `<div
+  id="public_queue">` — the id Turbo's `replace` action targets — showing the
+  currently-loading driver/truck or "nothing loading", and the queued list in
+  order).
+- Specs: model spec asserts (via mocking `Turbo::StreamsChannel
+  .broadcast_replace_to`) that check-in does *not* broadcast while
+  queued/finished transitions do; `spec/requests/public/queue_spec.rb`
+  (200 without auth, correct driver names in the body).
+
+### Deviations / gotchas discovered during execution
+
+- **`resource :queue` (singular) does not map to a singularly-named
+  controller by default** — Rails still looks for `Public::QueuesController`
+  (pluralized) unless `controller: "queue"` is passed explicitly. First pass
+  through the request spec 404'd until this was added.
+- **`mount ActionCable.server => "/cable"` was missing from `routes.rb`**
+  entirely (not something removed on purpose, like `solid_cable`/`kamal` —
+  just never added, since no prior phase needed a live cable connection).
+  Manually confirmed the mount actually accepts a websocket upgrade (curl
+  with `Upgrade: websocket` headers held the connection open rather than
+  returning immediately, which is the expected behavior for a successful
+  handshake).
+- **`config/cable.yml` uses the `async` adapter in development/test**, not
+  `redis` as `docs/plan.md`'s stack summary states generically — this was
+  already the case since Phase 1's `rails new` scaffold (redis is only
+  configured for `production`) and wasn't changed here. `async` is
+  sufficient for a single Puma process serving every open browser tab in
+  dev, which is all this phase needed; worth confirming redis config still
+  holds for `production` for real multi-process/multi-dyno deployment in
+  Phase 10.
+- **No system spec (Capybara + Cuprite, two simultaneous sessions) yet** for
+  the "action in one tab reflects live in another" scenario described in
+  `docs/plan.md`'s testing strategy — consistent with every phase so far,
+  full system-spec coverage is deferred to Phase 9. Verified the equivalent
+  manually instead: confirmed the `/cable` mount accepts a websocket upgrade,
+  and triggered a real status transition (`IssueOrderService`) against the
+  live dev DB to confirm `broadcast_public_queue!` executes without error
+  (i.e., the partial renders correctly with real data through the actual
+  Turbo broadcast API, not just the mocked spec).
+
+### How to verify
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 116 examples, 0 failures
+docker compose run --rm web bin/rubocop                          # clean except pre-existing Phase 1 offenses
+docker compose run --rm web bin/brakeman -q                      # 0 warnings
+```
+
 ## Next step
 
-**Phase 6** — Public real-time screen: `Public::QueueController` +
-`after_commit` broadcast on `Visit` (`broadcast_replace_to "public_queue"`),
-no authentication. *Verify*: two open tabs, an action in one (issuing an
-order or finishing a load) reflects in the other without a refresh. See
-details in [`docs/plan.md`](plan.md#build-phases-incremental-milestones).
+**Phase 7** — Notifications: `Notifications::Dispatcher` +
+`Notifications::NotifyDriverService` + adapters (`TestAdapter` in dev/test,
+Twilio SMS/WhatsApp adapters in production) + `SendNotificationJob`
+(Sidekiq), fired when a visit enters `loading`. *Verify*: `TestAdapter` logs
+the notification in dev; VCR-backed specs for the Twilio adapters pass
+without hitting the real network. See details in
+[`docs/plan.md`](plan.md#build-phases-incremental-milestones).

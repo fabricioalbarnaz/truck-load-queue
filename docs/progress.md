@@ -18,7 +18,7 @@ the design reference.
 | 4 | Dispatch screen (order issuance) | ✅ Done |
 | 5 | Queue screen (finish loading) | ✅ Done |
 | 6 | Public real-time screen (Turbo Streams) | ✅ Done |
-| 7 | Notifications (SMS/WhatsApp via Twilio) | ⏳ Not started |
+| 7 | Notifications (SMS/WhatsApp via Twilio) | ✅ Done |
 | 8 | Admin panel (Avo) | ⏳ Not started |
 | 9 | Test coverage + styling | ⏳ Not started |
 | 10 | Production hardening | ⏳ Not started |
@@ -591,12 +591,134 @@ docker compose run --rm web bin/rubocop                          # clean except 
 docker compose run --rm web bin/brakeman -q                      # 0 warnings
 ```
 
+## Phase 7 — Notifications (done)
+
+### What was created
+
+- **`Notifications::Adapters::BaseAdapter`**: one method, `#send_message(to:,
+  body:)`, raising `NotImplementedError` — just an interface marker, no
+  shared behavior to justify more.
+- **`Notifications::Adapters::TestAdapter`**: records every message in a
+  class-level `messages` array (`{ to:, body: }`) plus logs it via
+  `Rails.logger.info`, instead of sending anything real. `self.clear!`
+  resets it between specs (wired via a `spec/support/notifications.rb`
+  `config.before` hook).
+- **`Notifications::Adapters::TwilioSmsAdapter`** /
+  **`TwilioWhatsappAdapter`**: both wrap `Twilio::REST::Client`, with
+  `account_sid`/`auth_token`/`from` accepted as constructor kwargs
+  (defaulting to `ENV["TWILIO_ACCOUNT_SID"]` etc.) rather than read from
+  `ENV` inline in `#send_message` — this is what makes the adapters testable
+  with fixed, fake credentials independent of whatever's in `.env`. The
+  WhatsApp adapter prefixes both `to` and `from` with `whatsapp:` per
+  Twilio's API convention; otherwise identical.
+- **`Notifications::Dispatcher`**: `.new(driver).deliver(body)` resolves 1
+  or 2 adapters from `driver.notification_channel` (`sms`/`whatsapp`/`both`)
+  and instantiates+calls each. Adapter *class* resolution: `Rails.application
+  .config.x.notifications.adapter_class || REAL_ADAPTERS.fetch(channel)` —
+  when the config override is set (dev/test/staging), every channel routes
+  through that single class (`TestAdapter`, which just logs regardless of
+  channel); when it's `nil` (production only), each channel resolves to its
+  real Twilio-specific adapter class. This is why the config key is
+  documented as singular (`adapter_class`, not one per channel) — it's
+  purely a test/dev override switch, not the production routing table.
+- **`Notifications::NotifyDriverService`**: `MESSAGES` hash maps event
+  symbols to `->(visit) { ... }` copy builders — only `:your_turn` exists in
+  v1, per `docs/plan.md`. `.enqueue(visit:, event:)` is a class-method
+  convenience wrapping `SendNotificationJob.perform_later(visit_id:,
+  event:)`, used by both call sites below so the job's argument shape only
+  lives in one place. `#call` builds the message and hands it to
+  `Dispatcher`.
+- **`SendNotificationJob`** (Sidekiq via ActiveJob): `retry_on StandardError,
+  wait: :polynomially_longer, attempts: 5`; `perform(visit_id:, event:)`
+  reloads the `Visit` and delegates to `NotifyDriverService`.
+- **Trigger points — deliberately in the services, not a model callback**:
+  per `docs/plan.md` ("broadcasting lives on the model... notification
+  sending stays explicit inside the services"), both
+  `Visits::IssueOrderService` (when the queue was empty, so the visit goes
+  straight to `loading`) and `Visits::PromoteNextService` (when it promotes
+  the next `queued` visit) call `Notifications::NotifyDriverService.enqueue`
+  after a successful update. `Visits::FinishLoadingService` needed no
+  change — it already calls `PromoteNextService` internally, so the
+  notification fires transitively.
+- **`config/initializers/notifications.rb`**: sets the `adapter_class`
+  override, `nil` in production, `TestAdapter` everywhere else — see
+  deviation below for why this is wrapped in `config.to_prepare`.
+- **Testing infra added this phase** (none of it existed before): `webmock`
+  + `vcr` wired into `rails_helper.rb` (`require "webmock/rspec"`,
+  `spec/support/vcr.rb` with `cassette_library_dir = "spec/cassettes"`),
+  `spec/support/**/*.rb` autoloading un-commented, `ActiveJob::TestHelper`
+  included globally (for `have_enqueued_job`/`perform_enqueued_jobs`), and
+  `config.active_job.queue_adapter = :test` added to
+  `config/environments/test.rb` (previously absent — every environment
+  inherited the global `:sidekiq` adapter from `config/application.rb`,
+  meaning job specs would have silently tried to talk to real Sidekiq/Redis
+  instead of using ActiveJob's in-memory test adapter).
+- Specs: one per adapter (`TestAdapter`, plus VCR-backed specs for both
+  Twilio adapters — see below), `Dispatcher` (single channel, `both`, and
+  the real-adapter-resolution fallback path), `NotifyDriverService`
+  (`.enqueue` and `#call`), `SendNotificationJob`; updated
+  `IssueOrderService`/`PromoteNextService`/`FinishLoadingService` specs to
+  assert `SendNotificationJob` is (or isn't) enqueued with the right
+  `visit_id`/`event`.
+
+### Deviations / gotchas discovered during execution
+
+- **Referencing an app/ constant directly inside a `config/initializers/*.rb`
+  file crashed boot with `FrozenError: can't modify frozen Array` inside
+  `Rails::Engine#unshift`.** The first version of
+  `config/initializers/notifications.rb` assigned
+  `Notifications::Adapters::TestAdapter` directly at the top level; this
+  forced Zeitwerk to resolve that constant *before* every engine
+  (`turbo-rails`, `importmap-rails`, `action_text`) had finished registering
+  its own autoload/eager_load paths, and something in that order froze the
+  shared paths array before those engines could `unshift` onto it — their
+  own initializers were the ones crashing, not the notifications one. Fixed
+  by wrapping the assignment in `Rails.application.config.to_prepare do
+  ... end`, which defers it until after all engines have finished
+  registering paths. **Any future initializer that references an
+  autoloadable `app/` constant directly (not just via `to_prepare`/
+  `after_initialize`) should be treated as suspect** if boot ever throws a
+  frozen-array error again.
+- **Real Twilio credentials don't exist in this environment**, so the
+  Twilio adapter specs use hand-authored VCR cassettes
+  (`spec/cassettes/twilio_{sms,whatsapp}_adapter/send_message.yml`) built
+  from Twilio's publicly documented Messages resource response shape,
+  rather than ones recorded from a real API call. Both adapters take
+  `account_sid`/`auth_token`/`from` as constructor kwargs specifically so
+  the specs can pin fixed fake values (`ACtest...`) matching the cassette's
+  request URI — VCR's default matcher is method+URI, not body, so this was
+  sufficient without needing exact form-encoding fidelity. Passed on the
+  first run against both cassettes. **If real Twilio credentials are ever
+  configured, these cassettes should be re-recorded against the live API**
+  to catch any drift from the hand-authored version.
+- **`config/environments/test.rb` had no `active_job.queue_adapter`
+  override** — every environment was inheriting the global `:sidekiq`
+  setting from `config/application.rb`. Added `config.active_job
+  .queue_adapter = :test` so specs use ActiveJob's in-memory adapter
+  (required for `have_enqueued_job`/`perform_enqueued_jobs` to work, and to
+  guarantee tests never touch real Sidekiq/Redis).
+- Manually verified the entire async path end-to-end against the live dev
+  stack (not just specs): triggered `IssueOrderService` via `bin/rails
+  runner` for a `both`-channel driver, confirmed `SendNotificationJob` was
+  picked up by the actual `worker` (Sidekiq) container — not the one-off
+  runner process — and its logs showed `TestAdapter` firing twice (once per
+  channel) with the correctly composed pt-BR message.
+
+### How to verify
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 126 examples, 0 failures
+docker compose run --rm web bin/rubocop                          # clean except pre-existing Phase 1 offenses
+docker compose run --rm web bin/brakeman -q                      # 0 warnings
+```
+
 ## Next step
 
-**Phase 7** — Notifications: `Notifications::Dispatcher` +
-`Notifications::NotifyDriverService` + adapters (`TestAdapter` in dev/test,
-Twilio SMS/WhatsApp adapters in production) + `SendNotificationJob`
-(Sidekiq), fired when a visit enters `loading`. *Verify*: `TestAdapter` logs
-the notification in dev; VCR-backed specs for the Twilio adapters pass
-without hitting the real network. See details in
-[`docs/plan.md`](plan.md#build-phases-incremental-milestones).
+**Phase 8** — Avo admin panel: mount Avo at `/admin`, wire up
+`authorization_client = :pundit` with remapped action names (`avo_index?`,
+`avo_update?`, etc. — see the Phase 1 deviation note on Avo resolving to
+v4.x, not the 3.x the original plan assumed, since its config/authorization
+syntax may differ), `UserResource` exposing role assignment. *Verify*: a
+non-admin is redirected away from `/admin`; an admin can create a user and
+assign a role, and that user can log in to the corresponding screen. See
+details in [`docs/plan.md`](plan.md#build-phases-incremental-milestones).

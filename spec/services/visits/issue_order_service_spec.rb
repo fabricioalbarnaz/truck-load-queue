@@ -7,7 +7,10 @@ RSpec.describe Visits::IssueOrderService do
     it "sends the visit straight to loading when the queue is empty" do
       visit = create(:visit)
 
-      result = described_class.new(visit: visit, order_issued_by: operator).call
+      result = nil
+      expect {
+        result = described_class.new(visit: visit, order_issued_by: operator).call
+      }.to have_enqueued_job(SendNotificationJob).with(visit_id: visit.id, event: "your_turn")
 
       expect(result).to be_loading
       expect(result.order_issued_by).to eq(operator)
@@ -19,7 +22,10 @@ RSpec.describe Visits::IssueOrderService do
       create(:visit, :loading)
       visit = create(:visit)
 
-      result = described_class.new(visit: visit, order_issued_by: operator).call
+      result = nil
+      expect {
+        result = described_class.new(visit: visit, order_issued_by: operator).call
+      }.not_to have_enqueued_job(SendNotificationJob)
 
       expect(result).to be_queued
       expect(result.loading_started_at).to be_nil

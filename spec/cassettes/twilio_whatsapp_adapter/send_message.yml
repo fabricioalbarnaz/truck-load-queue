@@ -1,0 +1,24 @@
+---
+http_interactions:
+- request:
+    method: post
+    uri: https://api.twilio.com/2010-04-01/Accounts/ACtest0000000000000000000000000/Messages.json
+    body:
+      encoding: UTF-8
+      string: To=whatsapp%3A%2B15551234567&From=whatsapp%3A%2B15005550006&Body=Sua+vez+chegou%21
+    headers:
+      Content-Type:
+      - application/x-www-form-urlencoded
+  response:
+    status:
+      code: 201
+      message: Created
+    headers:
+      Content-Type:
+      - application/json
+    body:
+      encoding: UTF-8
+      string: '{"sid":"SM00000000000000000000000000000002","account_sid":"ACtest0000000000000000000000000","status":"queued","to":"whatsapp:+15551234567","from":"whatsapp:+15005550006","body":"Sua vez chegou!","date_created":"Tue, 14 Jul 2026 12:00:00 +0000","date_updated":"Tue, 14 Jul 2026 12:00:00 +0000","date_sent":null,"direction":"outbound-api","error_code":null,"error_message":null,"num_media":"0","num_segments":"1","price":null,"price_unit":"USD","uri":"/2010-04-01/Accounts/ACtest0000000000000000000000000/Messages/SM00000000000000000000000000000002.json"}'
+    http_version:
+  recorded_at: Tue, 14 Jul 2026 12:00:00 GMT
+recorded_with: VCR 6.3.1

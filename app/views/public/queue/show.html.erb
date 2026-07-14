@@ -1,0 +1,3 @@
+<%= turbo_stream_from "public_queue" %>
+
+<%= render "public/queue/board", loading: @loading, queued: @queued %>

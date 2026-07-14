@@ -1,5 +1,6 @@
 class Visit < ApplicationRecord
   ACTIVE_STATUSES = %w[in_yard queued loading].freeze
+  PUBLIC_QUEUE_RELEVANT_STATUSES = %w[queued loading finished].freeze
 
   belongs_to :driver
   belongs_to :truck
@@ -15,6 +16,8 @@ class Visit < ApplicationRecord
 
   scope :active_queue, -> { where(status: %w[queued loading]).order(:order_issued_at) }
 
+  after_commit :broadcast_public_queue!, if: :public_queue_relevant_change?
+
   def queue_position
     return 0 if loading?
 
@@ -22,6 +25,21 @@ class Visit < ApplicationRecord
   end
 
   private
+
+  def public_queue_relevant_change?
+    saved_change_to_status? &&
+      (PUBLIC_QUEUE_RELEVANT_STATUSES.include?(status) ||
+        PUBLIC_QUEUE_RELEVANT_STATUSES.include?(status_before_last_save))
+  end
+
+  def broadcast_public_queue!
+    Turbo::StreamsChannel.broadcast_replace_to(
+      "public_queue",
+      target: "public_queue",
+      partial: "public/queue/board",
+      locals: { loading: Visit.loading.first, queued: Visit.active_queue.queued }
+    )
+  end
 
   def driver_has_no_other_active_visit
     return unless driver_id && ACTIVE_STATUSES.include?(status)

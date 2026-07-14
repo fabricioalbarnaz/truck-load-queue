@@ -152,7 +152,7 @@ app/services/notifications/adapters/{base,twilio_sms,twilio_whatsapp,test}_adapt
 app/jobs/send_notification_job.rb
 app/controllers/registration/{drivers,trucks,visits}_controller.rb
 app/controllers/expedition/visits_controller.rb
-app/controllers/queue/visits_controller.rb
+app/controllers/queue_screen/visits_controller.rb  # Ruby's core `Queue` class blocks `module Queue`; URL stays /queue via `namespace :queue, module: "queue_screen"`
 app/controllers/public/queue_controller.rb
 app/views/{registration,expedition,queue,public}/**/*.html.erb
 app/assets/stylesheets/tokens.css, application.css, components/*.css
@@ -186,7 +186,7 @@ As part of Phase 1, a `docs/` folder is created at the project root containing:
 2. **Driver/Truck registration**: `Driver`, `Truck`, `DriverTruck` models + policies + `Registration::DriversController`/`TrucksController` + views. *Verify*: a `registration_operator` can CRUD; other roles get a 302.
 3. **Yard check-in**: `Visit` + `CheckInService` + yard listing. *Verify*: check-in creates an `in_yard` visit; duplicates are blocked.
 4. **Dispatch screen**: `IssueOrderService`, `Expedition::VisitsController` (yard + queue view). *Verify*: empty queue → `loading`; non-empty queue → `queued`, correct order.
-5. **Queue screen**: `FinishLoadingService` + `PromoteNextService`, `Queue::VisitsController`. *Verify*: finishing promotes the correct next visit by `order_issued_at`.
+5. **Queue screen**: `FinishLoadingService` + `PromoteNextService`, `QueueScreen::VisitsController` (module named to avoid colliding with Ruby's core `Queue` class; URL is still `/queue`). *Verify*: finishing promotes the correct next visit by `order_issued_at`.
 6. **Public real-time screen**: `Public::QueueController` + Turbo Streams broadcast. *Verify*: two open tabs, an action in one reflects in the other without a refresh.
 7. **Notifications**: Dispatcher + adapters + Sidekiq job, fired when entering `loading`. *Verify*: `TestAdapter` logs in dev; VCR-backed specs pass without hitting the real network.
 8. **Avo admin panel**: resources for all 6 models, Pundit integration, role assignment. *Verify*: a non-admin is redirected away from `/admin`; an admin can create a user and assign a role.

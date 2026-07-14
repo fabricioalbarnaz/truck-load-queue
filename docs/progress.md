@@ -16,7 +16,7 @@ the design reference.
 | 2 | Driver/truck registration | ✅ Done |
 | 3 | Yard check-in (`Visit` model) | ✅ Done |
 | 4 | Dispatch screen (order issuance) | ✅ Done |
-| 5 | Queue screen (finish loading) | ⏳ Not started |
+| 5 | Queue screen (finish loading) | ✅ Done |
 | 6 | Public real-time screen (Turbo Streams) | ⏳ Not started |
 | 7 | Notifications (SMS/WhatsApp via Twilio) | ⏳ Not started |
 | 8 | Admin panel (Avo) | ⏳ Not started |
@@ -433,12 +433,82 @@ docker compose run --rm web bin/rubocop                          # clean except 
 docker compose run --rm web bin/brakeman -q                      # 0 warnings
 ```
 
+## Phase 5 — Queue screen (done)
+
+### What was created
+
+- **`Visits::PromoteNextService`** (`app/services/visits/promote_next_service.rb`):
+  no-arg `#call` — finds `Visit.queued.order(:order_issued_at).first` and
+  promotes it to `loading` (setting `loading_started_at`); returns `nil`
+  (not an error) when there's nothing queued, since "no one to promote" is a
+  normal outcome, not a failure.
+- **`Visits::FinishLoadingService`** (`app/services/visits/finish_loading_service.rb`):
+  given `visit:` (expected `loading`) and `finished_by:`, sets `status:
+  finished`, `finished_at`, `finished_by`, then calls
+  `PromoteNextService.new.call` if the update succeeded. Promotion is
+  triggered from inside this service (rather than the controller) so it's
+  genuinely automatic per the state machine table in `docs/plan.md` — the
+  `queue_operator` only ever finishes a visit, never separately promotes.
+- **`VisitPolicy#finish?`**: `queue_or_admin?`, the third and final domain
+  action (`check_in?`/`issue_order?`/`finish?` now all exist, matching the
+  full authorization design in `docs/plan.md`).
+- **`QueueScreen::BaseController`**/**`QueueScreen::VisitsController`**: same
+  shape as `Expedition::VisitsController` — `index` (domain-action
+  authorize, loads `@loading_visit` and `@queue_visits` ordered by
+  `order_issued_at`), `finish` member action (`Visit.loading.find(...)` scope
+  so a stale/resubmitted request can't finish an already-finished visit),
+  redirect with notice/alert based on `result.errors.empty?`.
+- **Routes**: `namespace :queue, module: "queue_screen" do resources :visits,
+  only: [:index] do member { patch :finish } end end` — see deviation below
+  for why the module differs from the path.
+- **View**: `app/views/queue_screen/visits/index.html.erb` — currently-loading
+  visit (or a "nothing loading" message) with a "Finalizar carregamento"
+  button, plus the remaining queue table with `queue_position`.
+- Specs: `spec/services/visits/promote_next_service_spec.rb` (no-op when
+  empty; promotes by `order_issued_at` — explicitly using a later-created but
+  earlier-issued visit to prove creation order isn't what's used, per
+  `docs/plan.md`'s testing strategy note), `spec/services/visits/
+  finish_loading_service_spec.rb`, `finish?` permissions block in
+  `spec/policies/visit_policy_spec.rb`, `spec/requests/queue/visits_spec.rb`.
+
+### Deviations / gotchas discovered during execution
+
+- **Ruby's core `Queue` class collides with `module Queue`.** `docs/plan.md`
+  originally named this namespace `Queue::` (matching the `queue_operator`
+  role name), but Ruby's stdlib defines a top-level `Queue` class (from
+  `thread`, always loaded) — `module Queue; end` raises `TypeError: Queue is
+  not a module` at load time, and every request-spec hitting this controller
+  failed with exactly that error. Fixed by naming the Ruby module
+  `QueueScreen` instead, while keeping the user-facing URL at `/queue` via
+  `namespace :queue, module: "queue_screen"` — route path helpers
+  (`queue_visits_path`, `finish_queue_visit_path`) are unaffected since
+  they're derived from the scope name, not the module. `docs/plan.md`'s file
+  structure and build-phases sections were updated to reflect
+  `QueueScreen::VisitsController` so a future session doesn't reintroduce the
+  collision. **Any future top-level namespace should be checked against
+  Ruby/Rails core constant names before committing to it in the plan** (e.g.
+  `Set`, `Data`, `Process` are similarly reserved).
+
+### How to verify
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 111 examples, 0 failures
+docker compose run --rm web bin/rubocop                          # clean except pre-existing Phase 1 offenses
+docker compose run --rm web bin/brakeman -q                      # 0 warnings
+```
+
+Verified manually end-to-end against the running dev stack: `Visits::FinishLoadingService`
+invoked via `bin/rails runner` against the live dev DB correctly finished a
+`loading` visit and promoted the next `queued` visit (by `order_issued_at`)
+to `loading`; signed in as a `queue_operator` via `curl`, `GET /queue/visits`
+returned 200 with the correct "Painel de fila" page showing the newly
+promoted visit and a properly-formed `finish` form action
+(`/queue/visits/3/finish`).
+
 ## Next step
 
-**Phase 5** — Queue screen: `Visits::FinishLoadingService` +
-`Visits::PromoteNextService`, `Queue::VisitsController`, restricted to the
-`queue_operator` role. This is where `VisitPolicy#finish?` should finally be
-added (last of the three domain actions). *Verify*: finishing a `loading`
-visit promotes the correct next `queued` visit (by `order_issued_at`, not
-creation order) to `loading`. See details in
-[`docs/plan.md`](plan.md#build-phases-incremental-milestones).
+**Phase 6** — Public real-time screen: `Public::QueueController` +
+`after_commit` broadcast on `Visit` (`broadcast_replace_to "public_queue"`),
+no authentication. *Verify*: two open tabs, an action in one (issuing an
+order or finishing a load) reflects in the other without a refresh. See
+details in [`docs/plan.md`](plan.md#build-phases-incremental-milestones).

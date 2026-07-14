@@ -1,0 +1,34 @@
+<%= form_with model: truck, url: (truck.persisted? ? registration_truck_path(truck) : registration_trucks_path) do |form| %>
+  <% if truck.errors.any? %>
+    <div class="error-messages">
+      <h2><%= pluralize(truck.errors.count, "erro") %> impede(m) o salvamento:</h2>
+      <ul>
+        <% truck.errors.each do |error| %>
+          <li><%= error.full_message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div>
+    <%= form.label :plate, "Placa" %>
+    <%= form.text_field :plate %>
+  </div>
+
+  <div>
+    <%= form.label :model, "Modelo" %>
+    <%= form.text_field :model %>
+  </div>
+
+  <div>
+    <%= form.label :capacity, "Capacidade" %>
+    <%= form.number_field :capacity %>
+  </div>
+
+  <div>
+    <%= form.label :active, "Ativo" %>
+    <%= form.check_box :active %>
+  </div>
+
+  <%= form.submit "Salvar" %>
+<% end %>

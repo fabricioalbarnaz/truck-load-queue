@@ -1,0 +1,9 @@
+<h1><%= @truck.plate %></h1>
+
+<p><strong>Modelo:</strong> <%= @truck.model %></p>
+<p><strong>Capacidade:</strong> <%= @truck.capacity %></p>
+<p><strong>Ativo:</strong> <%= @truck.active? ? "Sim" : "Não" %></p>
+<p><strong>Motoristas:</strong> <%= @truck.drivers.map(&:name).join(", ").presence || "nenhum" %></p>
+
+<%= link_to "Editar", edit_registration_truck_path(@truck) %>
+<%= link_to "Voltar", registration_trucks_path %>

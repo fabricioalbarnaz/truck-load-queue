@@ -1,0 +1,44 @@
+<%= form_with model: driver, url: (driver.persisted? ? registration_driver_path(driver) : registration_drivers_path) do |form| %>
+  <% if driver.errors.any? %>
+    <div class="error-messages">
+      <h2><%= pluralize(driver.errors.count, "erro") %> impede(m) o salvamento:</h2>
+      <ul>
+        <% driver.errors.each do |error| %>
+          <li><%= error.full_message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div>
+    <%= form.label :name, "Nome" %>
+    <%= form.text_field :name %>
+  </div>
+
+  <div>
+    <%= form.label :cpf, "CPF" %>
+    <%= form.text_field :cpf %>
+  </div>
+
+  <div>
+    <%= form.label :phone, "Telefone (E.164, ex: +5511999999999)" %>
+    <%= form.text_field :phone %>
+  </div>
+
+  <div>
+    <%= form.label :notification_channel, "Canal de notificação" %>
+    <%= form.select :notification_channel, Driver::NOTIFICATION_CHANNELS %>
+  </div>
+
+  <div>
+    <%= form.label :active, "Ativo" %>
+    <%= form.check_box :active %>
+  </div>
+
+  <div>
+    <%= form.label :truck_ids, "Caminhões" %>
+    <%= form.collection_check_boxes :truck_ids, Truck.active.order(:plate), :id, :plate %>
+  </div>
+
+  <%= form.submit "Salvar" %>
+<% end %>

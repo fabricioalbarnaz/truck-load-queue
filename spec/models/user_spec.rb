@@ -11,7 +11,7 @@ RSpec.describe User, type: :model do
       user.roles << create(:role, :admin)
 
       expect(user.role?(:admin)).to be true
-      expect(user.role?(:fila)).to be false
+      expect(user.role?(:queue_operator)).to be false
     end
   end
 

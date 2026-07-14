@@ -4,9 +4,9 @@
 
 ROLES = {
   "admin" => "Administrador",
-  "cadastro" => "Operador de Cadastro",
-  "expedicao" => "Operador de Expedição",
-  "fila" => "Operador de Fila"
+  "registration_operator" => "Operador de Cadastro",
+  "expedition_operator" => "Operador de Expedição",
+  "queue_operator" => "Operador de Fila"
 }.freeze
 
 ROLES.each do |key, name|

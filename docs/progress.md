@@ -13,7 +13,7 @@ the design reference.
 | Phase | Description | Status |
 |---|---|---|
 | 1 | Skeleton (Rails + Docker + Devise + Pundit + Roles) | ✅ Done |
-| 2 | Driver/truck registration | ⏳ Not started |
+| 2 | Driver/truck registration | ✅ Done |
 | 3 | Yard check-in (`Visit` model) | ⏳ Not started |
 | 4 | Dispatch screen (order issuance) | ⏳ Not started |
 | 5 | Queue screen (finish loading) | ⏳ Not started |
@@ -134,10 +134,148 @@ showing name and roles); RSpec suite has 14 examples, 0 failures.
 
 ---
 
+## Phase 2 — Driver/truck registration (done)
+
+### What was created
+
+- **ActiveRecord::Encryption**: keys generated via `bin/rails db:encryption:init`
+  and stored in `config/credentials.yml.enc` (single file, not split per
+  environment — same keys used in dev/test/production). Needed before the
+  `Driver` model could exist, since `cpf`/`phone` are encrypted at rest.
+- **Models**:
+  - `Driver`: `name`, `cpf` (encrypted, deterministic — required for the
+    uniqueness validation and unique DB index to work against ciphertext),
+    `phone` (encrypted, deterministic), `notification_channel` enum
+    (`sms`/`whatsapp`/`both`, string-backed, default `sms`), `active`
+    (boolean, default `true`). CPF format validated with `CPF.valid?` from
+    `cpf_cnpj` (the gem has no built-in Rails validator, unlike assumed —
+    just the `CPF`/`CNPJ` classes). Phone validated via `phonelib`'s
+    `phone: true` validator (E.164).
+  - `Truck`: `plate` (unique, normalized to upcase/stripped via Rails'
+    `normalizes`), `model`, `capacity` (validated `> 0`, nil allowed),
+    `active`.
+  - `DriverTruck`: join model, unique on `[driver_id, truck_id]`.
+  - `has_many :trucks, through: :driver_trucks` on `Driver` (and the
+    inverse on `Truck`) — this gives a free `truck_ids=` writer, used by
+    the driver form's checkbox list to manage pairings.
+- **Policies**: `DriverPolicy`, `TruckPolicy` — both allow
+  index/show/create/update/destroy to `admin` or `cadastro`, deny everyone
+  else (including unauthenticated), following `ApplicationPolicy`'s
+  deny-by-default base.
+- **`ApplicationController`**: now `include Pundit::Authorization` +
+  `rescue_from Pundit::NotAuthorizedError` → redirect to `root_path` with an
+  alert. This is the first phase to actually wire Pundit into the request
+  cycle (Phase 1 only generated the empty `ApplicationPolicy`).
+- **Routes/controllers**: `namespace :cadastro do resources :drivers; resources :trucks end`.
+  `Cadastro::BaseController` only handles `authenticate_user!` — the
+  role gate is Pundit's `authorize`/`policy_scope` alone (no separate
+  hand-rolled role check), including on `index` (`authorize Driver` before
+  `policy_scope`, otherwise an unauthorized role would get a 200 with an
+  empty list instead of a redirect — `Scope#resolve` returning `.none`
+  doesn't raise on its own).
+- **Views**: plain ERB CRUD views (index/show/new/edit/_form) under
+  `app/views/cadastro/{drivers,trucks}/`, matching the existing minimal
+  hardcoded-pt-BR-string style (no i18n scoping introduced). Driver form
+  has a `collection_check_boxes :truck_ids` to assign trucks directly.
+- **Factories/specs**: `Driver`/`Truck`/`DriverTruck` factories (using
+  `CPF.generate` for valid unique CPFs); model specs (validations,
+  associations, enum, CPF/phone validation, DB-level encryption assertion,
+  plate normalization); policy specs using `pundit-matchers`' `permit`
+  matcher (added `require "pundit/rspec"` to `rails_helper.rb`); request
+  specs per controller covering unauthenticated (302), wrong-role (302),
+  and authorized (200 / correct create+destroy) cases (added
+  `Devise::Test::IntegrationHelpers` to `rails_helper.rb` for `sign_in` in
+  request specs).
+
+### Deviations / decisions discovered during execution
+
+- **No `Cadastro::DriverTrucksController`** — the plan's file-structure
+  list only names `DriversController`/`TrucksController`, so pairing
+  management was folded into the driver form via `truck_ids=` rather than
+  a separate CRUD screen/policy for `DriverTruck`.
+- **`DriverTruck#active` isn't exercised yet.** The `truck_ids=` writer
+  hard-deletes unchecked pairs rather than soft-disabling them, so the
+  "soft-disable without deleting history" behavior described in
+  `docs/plan.md` doesn't apply yet. This matters once `Visit` exists:
+  Phase 3's `CheckInService` (upserting `driver_trucks` pairs) is where
+  `active`/soft-disable semantics should actually be implemented and
+  tested.
+- **`cpf_cnpj` gem has no Rails validator built in** (only `CPF`/`CNPJ`
+  plain Ruby classes) — added a custom `validate :cpf_must_be_valid`
+  calling `CPF.valid?` rather than a one-line `validates :cpf, cpf: true`
+  as might be assumed from the gem name.
+- Deterministic encryption (`encrypts :cpf, deterministic: true`) was
+  necessary (not just `encrypts :cpf`) so that `validates :cpf, uniqueness: true`
+  and the DB unique index on `cpf` actually work — non-deterministic
+  encryption produces different ciphertext each time, breaking both.
+
+### How to verify
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 55 examples, 0 failures
+docker compose run --rm web bin/rubocop                          # clean except pre-existing Phase 1 offenses
+docker compose run --rm web bin/brakeman -q                      # 0 warnings
+```
+
+Verified manually end-to-end via `curl` against a running `docker compose up`
+stack: unauthenticated request to `/cadastro/drivers` → 302 to sign-in;
+signed in as a `fila`-role user → 302 to root (Pundit denial); signed in as
+a `cadastro`-role user → 200, and a full create → show → edit (assign a
+truck via `truck_ids`) → the association round-trips correctly; confirmed
+`cpf`/`phone` are stored as ciphertext in Postgres directly (not just at the
+Rails level) while the model still returns plaintext.
+
+---
+
+## Role key rename — Portuguese → English identifiers
+
+After Phase 2 shipped, the `Role::KEYS` values and everything derived from
+them were renamed from Portuguese to English, since role keys are code
+identifiers, not user-facing text (the `name` column — e.g. "Operador de
+Cadastro" — stays pt-BR, since that *is* user-facing):
+
+| Old key | New key |
+|---|---|
+| `cadastro` | `registration_operator` |
+| `expedicao` | `expedition_operator` |
+| `fila` | `queue_operator` |
+| `admin` | `admin` (unchanged) |
+
+Everything mirroring these names was renamed to match, since leaving the
+namespaces in Portuguese while the role keys were in English would have
+been inconsistent:
+
+- `Role::KEYS` (`app/models/role.rb`) and `db/seeds.rb`'s `ROLES` hash keys.
+- The `Cadastro::` namespace → `Registration::` — `app/controllers/registration/`,
+  `app/views/registration/`, `spec/requests/registration/`, and the
+  `namespace :registration` route (was `:cadastro`). Path helpers changed
+  accordingly (`registration_drivers_path`, etc).
+- `DriverPolicy`/`TruckPolicy`'s private `cadastro_or_admin?` helper →
+  `registration_or_admin?`.
+- All `role?(:cadastro)` / `role?(:fila)` call sites and spec factory trait
+  references (`create(:role, :cadastro)` → `create(:role, :registration_operator)`, etc — the traits are auto-generated
+  from `Role::KEYS` in `spec/factories/roles.rb`, so no factory file change
+  was needed beyond the model).
+- `docs/plan.md` (the architecture reference) was updated throughout —
+  state machine table, file structure, build-phase descriptions — so it
+  stays authoritative for the still-unbuilt `Expedicao::`/`Fila::`
+  controllers, which are now planned as `Expedition::`/`Queue::`.
+- **Data migration**: `db/migrate/20260713215625_rename_role_keys_to_english.rb`
+  does an `UPDATE roles SET key = ... WHERE key = ...` for the 3 renamed
+  keys (reversible), since the dev/test databases already had rows seeded
+  with the old Portuguese keys from Phase 2's manual verification — a
+  plain code change wouldn't have touched existing rows and `Role::KEYS`'
+  inclusion validation would have started rejecting the old values.
+
+Verified: `bundle exec rspec` (55 examples, 0 failures) after the migration
+ran in both `development` and `test`.
+
+---
+
 ## Next step
 
-**Phase 2** — Driver and truck registration: `Driver`, `Truck`,
-`DriverTruck` (N:N) models, policies,
-`Cadastro::DriversController`/`TrucksController` + views, restricted to the
-`cadastro` role. See details in
-[`docs/plan.md`](plan.md#build-phases-incremental-milestones).
+**Phase 3** — Yard check-in: `Visit` model + `CheckInService` + yard
+listing, restricted to the `registration_operator` role. This is also where
+`DriverTruck#active` soft-disable semantics should be revisited (see
+deviation note above) when the check-in service upserts pairs. See details
+in [`docs/plan.md`](plan.md#build-phases-incremental-milestones).

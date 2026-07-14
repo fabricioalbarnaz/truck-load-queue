@@ -23,7 +23,7 @@ module Registration
       if @driver.save
         redirect_to registration_driver_path(@driver), notice: "Motorista cadastrado com sucesso."
       else
-        render :new, status: :unprocessable_entity
+        render :new, status: :unprocessable_content
       end
     end
 
@@ -37,7 +37,7 @@ module Registration
       if @driver.update(driver_params)
         redirect_to registration_driver_path(@driver), notice: "Motorista atualizado com sucesso."
       else
-        render :edit, status: :unprocessable_entity
+        render :edit, status: :unprocessable_content
       end
     end
 

@@ -1,0 +1,47 @@
+<h1>Check-in no pátio</h1>
+
+<%= form_with model: @visit, url: registration_visits_path do |form| %>
+  <% if @visit.errors.any? %>
+    <div class="error-messages">
+      <h2><%= pluralize(@visit.errors.count, "erro") %> impede(m) o check-in:</h2>
+      <ul>
+        <% @visit.errors.each do |error| %>
+          <li><%= error.full_message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div>
+    <%= form.label :driver_id, "Motorista" %>
+    <%= form.collection_select :driver_id, @drivers, :id, :name, include_blank: true %>
+  </div>
+
+  <div>
+    <%= form.label :truck_id, "Caminhão" %>
+    <%= form.collection_select :truck_id, @trucks, :id, :plate, include_blank: true %>
+  </div>
+
+  <%= form.submit "Registrar check-in" %>
+<% end %>
+
+<h2>Pátio</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Motorista</th>
+      <th>Caminhão</th>
+      <th>Entrada no pátio</th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @yard_visits.each do |visit| %>
+      <tr>
+        <td><%= visit.driver.name %></td>
+        <td><%= visit.truck.plate %></td>
+        <td><%= visit.entered_yard_at.strftime("%d/%m/%Y %H:%M") %></td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_13_215625) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_14_132552) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -86,8 +86,36 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_13_215625) do
     t.index ["unlock_token"], name: "index_users_on_unlock_token", unique: true
   end
 
+  create_table "visits", force: :cascade do |t|
+    t.bigint "driver_id", null: false
+    t.bigint "truck_id", null: false
+    t.string "status", default: "in_yard", null: false
+    t.datetime "entered_yard_at", null: false
+    t.datetime "order_issued_at"
+    t.datetime "loading_started_at"
+    t.datetime "finished_at"
+    t.bigint "checked_in_by_id", null: false
+    t.bigint "order_issued_by_id"
+    t.bigint "finished_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["checked_in_by_id"], name: "index_visits_on_checked_in_by_id"
+    t.index ["driver_id", "status"], name: "index_visits_on_driver_id_and_status"
+    t.index ["driver_id"], name: "index_visits_on_driver_id"
+    t.index ["finished_by_id"], name: "index_visits_on_finished_by_id"
+    t.index ["order_issued_at"], name: "index_visits_on_order_issued_at"
+    t.index ["order_issued_by_id"], name: "index_visits_on_order_issued_by_id"
+    t.index ["truck_id", "status"], name: "index_visits_on_truck_id_and_status"
+    t.index ["truck_id"], name: "index_visits_on_truck_id"
+  end
+
   add_foreign_key "driver_trucks", "drivers"
   add_foreign_key "driver_trucks", "trucks"
   add_foreign_key "user_roles", "roles"
   add_foreign_key "user_roles", "users"
+  add_foreign_key "visits", "drivers"
+  add_foreign_key "visits", "trucks"
+  add_foreign_key "visits", "users", column: "checked_in_by_id"
+  add_foreign_key "visits", "users", column: "finished_by_id"
+  add_foreign_key "visits", "users", column: "order_issued_by_id"
 end

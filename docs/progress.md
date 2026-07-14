@@ -14,7 +14,7 @@ the design reference.
 |---|---|---|
 | 1 | Skeleton (Rails + Docker + Devise + Pundit + Roles) | ✅ Done |
 | 2 | Driver/truck registration | ✅ Done |
-| 3 | Yard check-in (`Visit` model) | ⏳ Not started |
+| 3 | Yard check-in (`Visit` model) | ✅ Done |
 | 4 | Dispatch screen (order issuance) | ⏳ Not started |
 | 5 | Queue screen (finish loading) | ⏳ Not started |
 | 6 | Public real-time screen (Turbo Streams) | ⏳ Not started |
@@ -272,10 +272,99 @@ ran in both `development` and `test`.
 
 ---
 
+## Phase 3 — Yard check-in (done)
+
+### What was created
+
+- **`Visit` model** (`app/models/visit.rb`): `driver`/`truck` belongs_to,
+  `checked_in_by`/`order_issued_by`/`finished_by` audit `belongs_to :class_name
+  "User"` (the latter two `optional: true` — not set until Phases 4/5 exist),
+  `status` enum (`in_yard`/`queued`/`loading`/`finished`, string-backed,
+  default `in_yard`), `entered_yard_at` required. Implemented the
+  `active_queue` scope and `queue_position` method exactly as designed in
+  `docs/plan.md`'s data model section, even though nothing calls them until
+  the dispatch/queue screens exist — they're fully self-contained on `Visit`
+  and already spec'd there, so building them alongside the model (rather
+  than bolting on later) avoided revisiting this file twice.
+- **Validation**: "only one active visit (`in_yard`/`queued`/`loading`) per
+  truck and per driver at a time," as two custom validations
+  (`driver_has_no_other_active_visit`, `truck_has_no_other_active_visit`)
+  excluding the record's own `id` (so later phases can transition an
+  existing visit's status — e.g. `queued` → `loading` — without
+  self-conflicting). Added pt-BR error messages under
+  `activerecord.errors.models.visit.attributes.{driver,truck}.already_in_active_visit`
+  in `config/locales/pt-BR.yml` (the app's first non-Devise i18n error
+  strings).
+- **`Visits::CheckInService`** (`app/services/visits/check_in_service.rb`):
+  the app's first service object. Upserts the `DriverTruck` pairing (creates
+  it if missing, **reactivates it if soft-disabled**) before creating the
+  `Visit`. This is also where the `DriverTruck#active` soft-disable
+  semantics flagged as unexercised in the Phase 2 log finally get used for
+  real.
+- **`VisitPolicy`**: only `index?` and `check_in?` for now (both
+  `registration_operator`-or-`admin`). Deliberately did **not** add
+  `issue_order?`/`finish?` yet, even though `docs/plan.md`'s Pundit section
+  names all three — those two have no controller to authorize until Phases
+  4/5 exist, and adding them now would be untestable dead code.
+- **`Registration::VisitsController`** (`index`/`create` only, no
+  show/edit/update/destroy — visit cancellation is out of v1 scope per the
+  plan): `index` renders a combined check-in form + yard listing (all
+  `in_yard` visits ordered by `entered_yard_at`); `create` authorizes via
+  the domain action (`authorize Visit, :check_in?`, not the generic
+  `create?`) and delegates to the service.
+- **Routes**: `resources :visits, only: %i[index create]` inside the
+  existing `namespace :registration`.
+- **View**: `app/views/registration/visits/index.html.erb` — driver/truck
+  `collection_select` dropdowns (any active driver/truck, not just
+  pre-paired ones — matches the plan's "check-in service creates the
+  pairing if missing" design) plus the yard table.
+- Model/service/policy/request specs, following the same conventions as
+  Phase 2. Added `spec/services/visits/` as the first services spec
+  directory.
+- Fixed a Rack deprecation warning surfaced by the new request spec
+  (`:unprocessable_entity` → `:unprocessable_content`) — applied
+  consistently across the Phase 2 `Registration::Drivers`/`TrucksController`
+  too, so the codebase doesn't end up with both spellings.
+
+### Deviations / gotchas discovered during execution
+
+- **Zeitwerk autoload roots are fixed at boot.** The `web`/`worker`
+  containers had been running since Phase 2 (no `app/services/` directory
+  existed yet at that boot). Referencing `Visits::CheckInService` from the
+  controller raised `NameError: uninitialized constant
+  Registration::VisitsController::Visits` — not because the file was wrong,
+  but because Zeitwerk never registered `app/services` as an autoload root
+  for the already-running process. Fixed with `docker compose restart web
+  worker`. **Any future session that adds a brand-new top-level `app/*`
+  subdirectory (the first file under it) needs the same restart** —
+  editing existing directories' files does not have this problem, only the
+  very first file in a new directory does.
+
+### How to verify
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 84 examples, 0 failures
+docker compose run --rm web bin/rubocop                          # clean except pre-existing Phase 1 offenses
+docker compose run --rm web bin/brakeman -q                      # 0 warnings
+```
+
+Verified manually end-to-end via `curl` against a running `docker compose
+up` stack (after the Zeitwerk restart above): signed in as a
+`registration_operator`, checked in a driver+truck pair through
+`/registration/visits` → 302 + the pair now appears in the yard listing;
+a second check-in attempt for the same driver+truck → `422` (blocked by
+the model validation, not just a service-level check); signed in as a
+`queue_operator` → `302` to root when hitting `/registration/visits`
+(Pundit denial, same pattern as Phase 2).
+
+---
+
 ## Next step
 
-**Phase 3** — Yard check-in: `Visit` model + `CheckInService` + yard
-listing, restricted to the `registration_operator` role. This is also where
-`DriverTruck#active` soft-disable semantics should be revisited (see
-deviation note above) when the check-in service upserts pairs. See details
-in [`docs/plan.md`](plan.md#build-phases-incremental-milestones).
+**Phase 4** — Dispatch screen: `IssueOrderService`,
+`Expedition::VisitsController` (yard + queue view), restricted to the
+`expedition_operator` role. This is where `VisitPolicy#issue_order?` should
+finally be added (see the Phase 3 deviation note on deliberately not
+pre-adding it). *Verify*: empty queue → visit goes straight to `loading`;
+non-empty queue → `queued`, correct FIFO order. See details in
+[`docs/plan.md`](plan.md#build-phases-incremental-milestones).

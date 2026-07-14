@@ -16,6 +16,7 @@ module Visits
       attributes[:loading_started_at] = Time.current if status == :loading
 
       @visit.update(attributes)
+      Notifications::NotifyDriverService.enqueue(visit: @visit, event: :your_turn) if status == :loading && @visit.errors.empty?
       @visit
     end
 

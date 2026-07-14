@@ -14,11 +14,13 @@ RSpec.describe Visits::FinishLoadingService do
       expect(result.finished_at).to be_present
     end
 
-    it "promotes the next queued visit to loading" do
+    it "promotes the next queued visit to loading and notifies that driver" do
       visit = create(:visit, :loading)
       next_up = create(:visit, :queued, order_issued_at: 1.hour.ago)
 
-      described_class.new(visit: visit, finished_by: operator).call
+      expect {
+        described_class.new(visit: visit, finished_by: operator).call
+      }.to have_enqueued_job(SendNotificationJob).with(visit_id: next_up.id, event: "your_turn")
 
       expect(next_up.reload).to be_loading
     end

@@ -13,6 +13,10 @@ class VisitPolicy < ApplicationPolicy
     expedition_or_admin?
   end
 
+  def finish?
+    queue_or_admin?
+  end
+
   class Scope < Scope
     def resolve
       operator_or_admin? ? scope.all : scope.none
@@ -34,5 +38,9 @@ class VisitPolicy < ApplicationPolicy
 
   def expedition_or_admin?
     user&.admin? || user&.role?(:expedition_operator)
+  end
+
+  def queue_or_admin?
+    user&.admin? || user&.role?(:queue_operator)
   end
 end

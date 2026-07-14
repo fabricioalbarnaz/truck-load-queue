@@ -1,0 +1,47 @@
+<h1>Painel de fila</h1>
+
+<h2>Carregando</h2>
+
+<% if @loading_visit %>
+  <table>
+    <thead>
+      <tr>
+        <th>Motorista</th>
+        <th>Caminhão</th>
+        <th>Início do carregamento</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><%= @loading_visit.driver.name %></td>
+        <td><%= @loading_visit.truck.plate %></td>
+        <td><%= @loading_visit.loading_started_at.strftime("%d/%m/%Y %H:%M") %></td>
+        <td><%= button_to "Finalizar carregamento", finish_queue_visit_path(@loading_visit), method: :patch %></td>
+      </tr>
+    </tbody>
+  </table>
+<% else %>
+  <p>Nenhum caminhão carregando no momento.</p>
+<% end %>
+
+<h2>Fila</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Posição</th>
+      <th>Motorista</th>
+      <th>Caminhão</th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @queue_visits.each do |visit| %>
+      <tr>
+        <td><%= visit.queue_position %></td>
+        <td><%= visit.driver.name %></td>
+        <td><%= visit.truck.plate %></td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>

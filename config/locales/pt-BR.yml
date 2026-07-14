@@ -1,3 +1,12 @@
 pt-BR:
   app:
     name: "Fila de Carregamento"
+  activerecord:
+    errors:
+      models:
+        visit:
+          attributes:
+            driver:
+              already_in_active_visit: "já possui uma visita ativa no pátio"
+            truck:
+              already_in_active_visit: "já possui uma visita ativa no pátio"

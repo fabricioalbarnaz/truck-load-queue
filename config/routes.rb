@@ -5,6 +5,7 @@ Rails.application.routes.draw do
   namespace :registration do
     resources :drivers
     resources :trucks
+    resources :visits, only: %i[index create]
   end
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.

@@ -133,6 +133,7 @@ Single `Dockerfile` (no Node stage — Propshaft + importmap remove the need for
 `docker-compose.yml`: services `db` (postgres:16-alpine), `redis` (redis:7-alpine), `web` (rails server), `worker` (sidekiq). `.env` (gitignored) for `DATABASE_URL`, `REDIS_URL`, Twilio credentials, `RAILS_MASTER_KEY`.
 
 The final project phase includes production hardening: multi-stage Dockerfile, non-root user, healthchecks, `RAILS_LOG_TO_STDOUT`.
+- **Phase 10 deviation**: `config/database.yml`'s `production:` block had Rails 8's default `cache`/`queue`/`cable` secondary-database scaffolding (for solid_cache/solid_queue/solid_cable), pointing at `db/*_migrate` paths that don't exist — `solid_queue`/`solid_cable` were removed from the Gemfile in Phase 1 (Sidekiq + Action Cable's redis adapter used instead) and `solid_cache` was never finished being wired up. This would have broken `db:prepare` on first real production boot; removed, keeping only `primary`. The image is shared between web/worker roles (same as `docker-compose.yml`'s dev services) — the `HEALTHCHECK` added to the `Dockerfile` is web-role-specific (`curl .../up`), so worker containers must run with `--no-healthcheck` (see `CLAUDE.md`'s Production section). Full details and the exact verification commands in `docs/progress.md`'s Phase 10 section.
 
 ## Testing strategy
 
@@ -215,3 +216,4 @@ As part of Phase 1, a `docs/` folder is created at the project root containing:
 - Full manual flow: register driver+truck → yard check-in → issue order (dispatch) → confirm the public screen updates live → finish loading (queue) → confirm automatic promotion of the next truck and the "TestAdapter" notification firing in the logs.
 - `bundle exec rspec` (inside the container) with the whole suite green.
 - Visit `/admin`, create a new user and assign a role, confirm they can log in to the corresponding screen.
+- `docker build -t app .` succeeds, and the resulting image boots correctly in both roles (web via its default `CMD`, worker via `bundle exec sidekiq`) against real Postgres/Redis — see `CLAUDE.md`'s Production section for the exact commands, and `docs/progress.md`'s Phase 10 section for what was actually verified.

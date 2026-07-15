@@ -62,6 +62,45 @@ volume instead of mounting the host directory. If running raw `docker run` comma
 `docker compose`, which is already set up correctly), use the Windows-style path
 (`-v "D:/Sites:/app"`) with `MSYS_NO_PATHCONV=1`.
 
+## Production
+
+No deploy tooling (Kamal, CI/CD) exists yet — this is manual `docker build`/`docker run`, per the
+top-of-file comment in `Dockerfile`. The image is shared between the web and worker roles (same
+pattern as `docker-compose.yml`'s dev services): default `CMD` runs the Rails server; override it
+to run Sidekiq instead.
+
+```bash
+docker build -t app .
+
+# web — runs db:prepare (create+migrate+seed) automatically on boot, per bin/docker-entrypoint
+docker run -d -p 80:3000 \
+  -e RAILS_MASTER_KEY=<config/master.key> \
+  -e DATABASE_URL=postgres://app:<password>@<db-host>:5432/app_production \
+  -e REDIS_URL=redis://<redis-host>:6379/0 \
+  --name app app
+
+# worker — same image, CMD overridden; does NOT run db:prepare (only the exact
+# `./bin/rails server` command triggers it — see bin/docker-entrypoint)
+docker run -d \
+  -e RAILS_MASTER_KEY=<config/master.key> \
+  -e DATABASE_URL=postgres://app:<password>@<db-host>:5432/app_production \
+  -e REDIS_URL=redis://<redis-host>:6379/0 \
+  --no-healthcheck \
+  --name app-worker app bundle exec sidekiq
+```
+
+- `--no-healthcheck` on the worker: the image's baked-in `HEALTHCHECK` (`curl .../up`) assumes the
+  web role — it will always fail on a worker container, which never binds port 3000.
+- `config/database.yml`'s `production:` block intentionally has only a `primary` entry — no
+  `cache`/`queue`/`cable` secondary databases (that's Rails 8's default solid_cache/solid_queue/
+  solid_cable scaffolding; this app uses Sidekiq + Action Cable's redis adapter instead, and
+  solid_cache was never actually wired up — see `docs/progress.md`'s Phase 10 section).
+- See `.env.example`'s "Production only" section for the full env var list (`ADMIN_EMAIL`/
+  `ADMIN_PASSWORD` for seeding, Twilio credentials for real SMS/WhatsApp, etc).
+- Verified end-to-end (build, boot, migrate, seed, sign in, healthcheck) against real
+  Postgres/Redis via `docker compose`'s `db`/`redis` services during Phase 10 — see
+  `docs/progress.md` for the exact commands used.
+
 ## Architecture essentials
 
 - **No Node/Yarn**: Propshaft + importmap, plain CSS with custom properties (`tokens.css`,

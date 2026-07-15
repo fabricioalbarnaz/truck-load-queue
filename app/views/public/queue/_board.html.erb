@@ -6,7 +6,7 @@
     <% if loading %>
       <p><%= loading.driver.name %> — <%= loading.truck.plate %></p>
     <% else %>
-      <p>Nenhum caminhão carregando no momento.</p>
+      <p class="empty">Nenhum caminhão carregando no momento.</p>
     <% end %>
   </section>
 
@@ -19,7 +19,7 @@
         <% end %>
       </ol>
     <% else %>
-      <p>Fila vazia.</p>
+      <p class="empty-state">Fila vazia.</p>
     <% end %>
   </section>
 </div>

@@ -1,0 +1,71 @@
+form:not(.button_to) {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  margin-bottom: var(--space-6);
+  max-width: 32rem;
+}
+
+form:not(.button_to) > div {
+  margin-bottom: var(--space-4);
+}
+
+label {
+  display: block;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-1);
+}
+
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="tel"],
+select,
+textarea {
+  width: 100%;
+  font-family: inherit;
+  font-size: var(--font-size-base);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.field-checkboxes label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: normal;
+  color: var(--color-text);
+  margin-right: var(--space-4);
+}
+
+.error-messages {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.error-messages h2 {
+  font-size: var(--font-size-sm);
+  margin: 0 0 var(--space-2);
+}
+
+.error-messages ul {
+  margin: 0;
+  padding-left: var(--space-5);
+}

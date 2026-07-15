@@ -17,16 +17,53 @@
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/icon.png">
 
-    <%# Includes all stylesheet files in app/assets/stylesheets %>
-    <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+    <%= stylesheet_link_tag "tokens", "data-turbo-track": "reload" %>
+    <%= stylesheet_link_tag "application", "data-turbo-track": "reload" %>
+    <%= stylesheet_link_tag "components/buttons", "data-turbo-track": "reload" %>
+    <%= stylesheet_link_tag "components/forms", "data-turbo-track": "reload" %>
+    <%= stylesheet_link_tag "components/tables", "data-turbo-track": "reload" %>
+    <%= stylesheet_link_tag "components/flash", "data-turbo-track": "reload" %>
+    <%= stylesheet_link_tag "components/nav", "data-turbo-track": "reload" %>
     <%= javascript_importmap_tags %>
   </head>
 
   <body>
-    <% flash.each do |type, message| %>
-      <p class="flash flash-<%= type %>"><%= message %></p>
+    <% if user_signed_in? %>
+      <header class="site-header">
+        <div class="site-header__bar">
+          <%= link_to t("app.name"), root_path, class: "site-header__brand" %>
+
+          <nav class="site-nav">
+            <% if current_user.admin? || current_user.role?(:registration_operator) %>
+              <%= link_to "Motoristas", registration_drivers_path %>
+              <%= link_to "Caminhões", registration_trucks_path %>
+              <%= link_to "Check-in", registration_visits_path %>
+            <% end %>
+            <% if current_user.admin? || current_user.role?(:expedition_operator) %>
+              <%= link_to "Expedição", expedition_visits_path %>
+            <% end %>
+            <% if current_user.admin? || current_user.role?(:queue_operator) %>
+              <%= link_to "Fila", queue_visits_path %>
+            <% end %>
+            <% if current_user.admin? %>
+              <%= link_to "Admin", "/admin" %>
+            <% end %>
+          </nav>
+
+          <div class="site-header__user">
+            <span><%= current_user.name %></span>
+            <%= button_to "Sair", destroy_user_session_path, method: :delete, class: "btn-secondary" %>
+          </div>
+        </div>
+      </header>
     <% end %>
 
-    <%= yield %>
+    <div class="page">
+      <% flash.each do |type, message| %>
+        <p class="flash flash-<%= type %>"><%= message %></p>
+      <% end %>
+
+      <%= yield %>
+    </div>
   </body>
 </html>

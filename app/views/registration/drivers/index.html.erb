@@ -19,7 +19,7 @@
         <td><%= driver.active? ? "Sim" : "Não" %></td>
         <td>
           <%= link_to "Editar", edit_registration_driver_path(driver) %>
-          <%= button_to "Remover", registration_driver_path(driver), method: :delete, form: { data: { turbo_confirm: "Remover este motorista?" } } %>
+          <%= button_to "Remover", registration_driver_path(driver), method: :delete, class: "btn-danger", form: { data: { turbo_confirm: "Remover este motorista?" } } %>
         </td>
       </tr>
     <% end %>

@@ -1,3 +1,7 @@
+<% content_for :head do %>
+  <%= stylesheet_link_tag "public_queue", "data-turbo-track": "reload" %>
+<% end %>
+
 <%= turbo_stream_from "public_queue" %>
 
 <%= render "public/queue/board", loading: @loading, queued: @queued %>

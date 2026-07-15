@@ -20,7 +20,7 @@ the design reference.
 | 6 | Public real-time screen (Turbo Streams) | ✅ Done |
 | 7 | Notifications (SMS/WhatsApp via Twilio) | ✅ Done |
 | 8 | Admin panel (Avo) | ✅ Done |
-| 9 | Test coverage + styling | ⏳ Not started |
+| 9 | Test coverage + styling | ✅ Done |
 | 10 | Production hardening | ⏳ Not started |
 
 ---
@@ -868,12 +868,167 @@ and can use `/registration/visits` (the "Check-in" screen) — the full
 "admin creates a user, assigns a role, that user logs into their screen"
 flow from the phase's verify step.
 
+## Phase 9 — Test coverage + styling (done)
+
+### What was created
+
+**System specs (Capybara + Cuprite) actually work now** — the Phase 8
+Ferrum/RSpec timeout was root-caused and fixed (see deviations below).
+Added:
+- `spec/system/visit_lifecycle_spec.rb` — the flagship scenario named in
+  `docs/plan.md`'s testing strategy: check-in → issue order → finish,
+  using **two independent Capybara sessions** (`Capybara.using_session
+  (:public) { ... }` for a second "browser tab") to observe the public
+  queue's Turbo Stream updates genuinely live, not simulated.
+- `spec/system/avo_admin_spec.rb` — real-browser replacement for Phase 8's
+  request-spec-only Avo coverage: non-admin redirected away from `/admin`;
+  admin creates a user, assigns a role via the `UserRole` resource, and
+  that new user can immediately log in and reach their own screen.
+- `spec/support/capybara.rb`, `spec/support/system_helpers.rb` (the
+  `sign_in_via_form` helper, shared across both specs), `spec/support/
+  database_cleaner.rb` — all new infrastructure, see deviations for why
+  each piece exists.
+
+**Spec gaps closed**: `spec/policies/application_policy_spec.rb` (the
+shared `avo_*`/generic-action defaults every other policy inherits, never
+directly tested before), `spec/requests/home_spec.rb` (the root
+`HomeController` page had no coverage at all through Phase 8).
+
+**Styling pass** — the app had zero CSS before this phase beyond
+Propshaft's empty generated `application.css`. Added:
+- `app/assets/stylesheets/tokens.css` — CSS custom properties (color,
+  spacing, type scale, radii, shadows), light values in `:root` and a
+  `prefers-color-scheme: dark` override block.
+- `app/assets/stylesheets/components/{buttons,forms,tables,flash,nav}.css`
+  — generic element-selector styling (not custom classes) so it applies to
+  Rails' default `form_with`/`button_to` output and Devise's own default
+  views without needing every view template rewritten; `.btn-secondary`/
+  `.btn-danger` utility classes for the few buttons that need a different
+  look (logout, destructive actions).
+- `app/assets/stylesheets/public_queue.css` — deliberately separate from
+  the rest: the public queue screen is a **physical yard monitor**, not a
+  desktop UI, so it always renders dark-on-dark with very large
+  (`clamp()`-based responsive) type regardless of the viewer's OS theme,
+  has no header/nav chrome, and uses its own layout (`layouts/public.html
+  .erb`, set via `layout "public"` on `Public::QueueController`) instead of
+  the app's normal one.
+- `app/views/layouts/application.html.erb`: added a persistent header
+  (app name, role-appropriate nav links, current user, logout) shown on
+  every authenticated page — previously only `home/index.html.erb` had any
+  navigation at all, and only to the registration screens (expedition/
+  queue/admin had no links anywhere in the UI, only reachable by typing the
+  URL). All content now wrapped in `.page` for consistent max-width/padding.
+  `home/index.html.erb` simplified since its nav/logout are now in the
+  shared header.
+- Explicit `<link>` tags per stylesheet file in the layout (not `stylesheet
+  _link_tag :app` alone) — Propshaft doesn't bundle a directory into one
+  response the way Sprockets' `//= require_tree .` did; each file needs its
+  own tag.
+
+### Deviations / gotchas discovered during execution
+
+- **The Phase-8 Ferrum/RSpec timeout was a driver-name collision, not an
+  RSpec/webmock interaction as originally suspected.** `capybara-cuprite`
+  registers its own default `:cuprite` driver as a side effect of being
+  `require`d (`lib/capybara/cuprite.rb` calls `Capybara.register_driver
+  (:cuprite) { ... }` at the top level), and for reasons not fully pinned
+  down it wins over a same-named re-registration in `spec/support/
+  capybara.rb` specifically when loaded through the full RSpec/Rails boot
+  sequence (a plain `bin/rails runner` script never showed the collision).
+  Registering under a different name (`:app_cuprite`) sidesteps it
+  entirely and was the actual fix — confirmed by inspecting `Capybara
+  .drivers[:cuprite].call(app).options`, which showed a default `window_size:
+  [1400, 1400]` and no `browser_path` at all, not the values passed in this
+  project's registration.
+- **System specs need `DatabaseCleaner`, not Rails' transactional
+  fixtures.** A real browser (Cuprite) talks to the app through a separate
+  Capybara/Puma server thread with its own DB connection — data created
+  inside the spec's wrapping transaction is invisible to it (Postgres
+  transaction isolation, not a Rails bug). Added `database_cleaner-active_
+  record`; `config.use_transactional_fixtures = false` globally in
+  `rails_helper.rb`, with `spec/support/database_cleaner.rb` picking
+  `:transaction` for everything and `:truncation` only for `type: :system`.
+  DatabaseCleaner's safeguard also refused to run at first —
+  `ENV['DATABASE_URL']` points at the `db` Docker Compose service hostname,
+  which its heuristic treats as "remote"; `DatabaseCleaner
+  .allow_remote_database_url = true` (test-env only, gated by the same
+  `RAILS_ENV=production` abort already at the top of `rails_helper.rb`)
+  bypasses it.
+- **`Warden::Test::Helpers#login_as` hits an arity bug with this Devise/
+  Warden combo** (`devise 5.0.4` + `warden 1.2.9`) —
+  `Devise::Models::Authenticatable#serialize_from_session` gets called
+  with 5 arguments instead of 2, raising `ArgumentError` on the very first
+  authenticated request after `login_as`. Not investigated further since a
+  correct, arguably more realistic alternative exists: `sign_in_via_form`
+  (`spec/support/system_helpers.rb`) drives the actual Devise sign-in form
+  through the real browser instead of bypassing it. `spec/support/
+  warden.rb` (added, then found broken, then removed) never shipped.
+- **A `let(:record)` referenced for the first time *inside* a `select
+  ..., from: ...` call evaluates too late.** The very first version of
+  `visit_lifecycle_spec.rb` failed with "unable to find option" because
+  `select driver.name, from: "visit_driver_id"` triggers `let(:driver)`'s
+  `create(:driver)` *at that exact line* — which is *after* `visit
+  registration_visits_path` already rendered the (then-empty) dropdown.
+  This produced a very convincing but completely wrong trail of
+  evidence pointing at threading/transaction-visibility bugs (the same
+  symptom — "record exists in the test's own query, missing from the
+  rendered page" — is what a genuine cross-connection visibility bug looks
+  like too), and most of the DatabaseCleaner work above was originally
+  motivated by chasing this false lead. Fixed by forcing eager evaluation
+  (`driver; truck;`) before the first `visit` in the test. **Lesson for
+  future system specs in this repo**: reference every `let` that a
+  server-rendered page needs to already reflect *before* the `visit` call
+  that renders it, not inline at first use.
+- **A real, narrow race condition, found only via random-seed reruns**:
+  `sign_in_via_form`'s original version did `click_on "Sair"` immediately
+  followed by `visit new_user_session_path` — occasionally (reproduced
+  reliably with `--seed 3`, ~1 in 5 random runs) the second request raced
+  the first one's session-cookie update and landed back on an
+  "already authenticated" page instead of the sign-in form. Fixed by
+  waiting for the post-logout redirect chain to actually land
+  (`expect(page).to have_field("user_email")`) before proceeding, only
+  falling back to an explicit `visit new_user_session_path` when there was
+  no active session to log out of in the first place. Verified fixed with
+  5 consecutive full-suite runs at random seeds (all green) after the fix,
+  versus reproducing on seed 3 before it.
+- **`root_path` (bare helper) resolves to Avo's engine-internal root inside
+  system specs too**, not just request specs (the Phase 8 finding) —
+  `sign_in_via_form` uses the literal `"/"` for the same reason documented
+  there.
+- **CSS specificity bug**: the base button rule was `button:not(.btn-plain)`
+  (specificity of an element + a pseudo-class argument), which
+  *outranks* a plain `.btn-secondary` class override placed later in the
+  same file, so utility classes silently lost. Rewritten as `button
+  .btn-secondary` (element + class, matching specificity, later in source
+  order — wins as intended). Caught by screenshotting the rendered page via
+  Cuprite (used here as a manual visual-QA tool, not just for specs) and
+  noticing the "Sair" button was solid blue instead of outlined.
+- **`bin/rails generate avo:install`'s `mount_avo` route-insertion issue**
+  (from Phase 8, never root-caused) is suspected to be the same underlying
+  cause as nothing new surfacing here — not revisited.
+
+### How to verify
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 154 examples, 0 failures (verified stable across 5 random-seed runs)
+docker compose run --rm web bin/rubocop                          # clean except pre-existing Phase 1 offenses
+docker compose run --rm web bin/brakeman -q                      # 0 warnings
+```
+
+Verified manually via real Cuprite screenshots (not just automated specs):
+sign-in page, home page with the new header/nav, the registration check-in
+screen, the drivers table (with the danger-styled "Remover" button), and
+the public queue yard-monitor screen (large green "loading now" text on a
+dark background, readable at a glance).
+
 ## Next step
 
-**Phase 9** — Test coverage + styling: close spec gaps (including finally
-standing up real Capybara + Cuprite system specs — see this phase's
-deviations for the Ferrum/RSpec timeout issue to resolve first), a
-`tokens.css` pass (colors/spacing/typography as custom properties), and a
-responsive large-typography layout for the yard monitor (`public/queue`).
-*Verify*: `bundle exec rspec` green (including new system specs). See
-details in [`docs/plan.md`](plan.md#build-phases-incremental-milestones).
+**Phase 10** — Production hardening: multi-stage `Dockerfile` review (it
+already exists from Phase 1's `rails new`, but hasn't been revisited since),
+non-root user, secrets via `RAILS_MASTER_KEY`, healthchecks,
+`RAILS_LOG_TO_STDOUT`, and a final pass confirming `config/environments/
+production.rb` settings (Action Cable's Redis adapter, force_ssl, etc.) are
+actually correct for a real deploy target. *Verify*: production image
+builds and boots cleanly; see `docs/plan.md`'s "End-to-end verification"
+checklist for the full manual pass. See details in
+[`docs/plan.md`](plan.md#build-phases-incremental-milestones).

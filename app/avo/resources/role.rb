@@ -12,7 +12,7 @@ class Avo::Resources::Role < Avo::BaseResource
   def fields
     field :id, as: :id
     # field :avatar, as: :avatar
-    field :key, as: :text
+    field :key, as: :text, readonly: true
     field :name, as: :text
   end
 end

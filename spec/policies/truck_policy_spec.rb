@@ -24,4 +24,11 @@ RSpec.describe TruckPolicy do
       expect(subject).not_to permit(nil, Truck)
     end
   end
+
+  permissions :avo_index?, :avo_show?, :avo_create?, :avo_update?, :avo_destroy? do
+    it "grants access to admin only, not a registration operator" do
+      expect(subject).to permit(admin_user, Truck)
+      expect(subject).not_to permit(registration_user, Truck)
+    end
+  end
 end

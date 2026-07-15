@@ -19,7 +19,7 @@ the design reference.
 | 5 | Queue screen (finish loading) | ✅ Done |
 | 6 | Public real-time screen (Turbo Streams) | ✅ Done |
 | 7 | Notifications (SMS/WhatsApp via Twilio) | ✅ Done |
-| 8 | Admin panel (Avo) | ⏳ Not started |
+| 8 | Admin panel (Avo) | ✅ Done |
 | 9 | Test coverage + styling | ⏳ Not started |
 | 10 | Production hardening | ⏳ Not started |
 
@@ -712,13 +712,168 @@ docker compose run --rm web bin/rubocop                          # clean except 
 docker compose run --rm web bin/brakeman -q                      # 0 warnings
 ```
 
+## Phase 8 — Avo admin panel (done)
+
+This phase surfaced more real deviations from `docs/plan.md` than any prior
+one, because the plan's Avo section was written against Avo 3's
+capabilities/API, and the gem that actually resolved (flagged as a risk back
+in Phase 1) is Avo 4.0.11 — a genuinely different product in a few places
+that only became apparent by installing it and testing real behavior.
+
+### What was created
+
+- **Mounted Avo at `/admin`** (not the gem's `/avo` default):
+  `config.root_path = "/admin"` in `config/initializers/avo.rb`, plus
+  `mount_avo` added to `config/routes.rb` (see deviation below — the
+  `avo:install` generator claims to add this route but doesn't actually
+  write it).
+- **Single-gate authentication** (see the "Avo authorization is a paid
+  plugin" deviation below for why there's only one gate, not the two the
+  plan originally called for): `config.current_user_method = :current_user`
+  + `config.authenticate_with { redirect_to main_app.root_path, alert: ...
+  unless current_user&.admin? }`. `main_app.root_path` (not bare
+  `root_path`) is required here — Avo's own controller has its own
+  engine-internal `root_path` pointing back into Avo itself.
+- **`ApplicationPolicy`**: added a private `admin?` helper and six `avo_*`
+  methods (`avo_index?`/`avo_show?`/`avo_create?`/`avo_new?`/`avo_update?`/
+  `avo_edit?`/`avo_destroy?`), all defaulting to `admin?`. Every resource
+  policy now gets admin-only Avo access for free by inheritance — no
+  existing policy (`DriverPolicy`/`TruckPolicy`/`VisitPolicy`) needed any
+  change, since their `Scope`s already included `admin?` in their
+  conditions from earlier phases.
+- **Three new policies** for models that had none yet: `UserPolicy`,
+  `DriverTruckPolicy`, `UserRolePolicy` — each just a `Scope` (`admin? ?
+  scope.all : scope.none`), relying entirely on `ApplicationPolicy`'s
+  inherited `avo_*` defaults. **`RolePolicy`** additionally overrides
+  `avo_create?`/`avo_destroy?` to `false` — `Role::KEYS` is fixed reference
+  data (4 rows); creating/destroying one from Avo would desync from
+  `Role::KEYS` or cascade-delete `user_roles`. `avo_new?` inherits from
+  `avo_create?` automatically, so both create paths are blocked by the one
+  override.
+- **Avo resources** (`app/avo/resources/*.rb`, all pre-existed as
+  auto-generated stubs from Phase 1/2/3's `rails generate model` except
+  `user.rb`, which didn't exist and was added fresh):
+  - `user.rb`: `id`/`name`/`email` plus `password`/`password_confirmation`
+    (`as: :password, only_on: [:new, :edit], required: false` — optional so
+    editing a user without changing their password doesn't fail Devise's
+    conditional password validation). **No `roles` field** — see the
+    "has_many/has_and_belongs_to_many field doesn't render" deviation below.
+  - `role.rb`: `key` field changed to `readonly: true` (the code identifier
+    that `Role::KEYS`/`user.role?(:x)` depend on everywhere — editable would
+    be a live footgun); `name` (the pt-BR display label) stays editable.
+  - `user_role.rb`: **restored** after initially deleting it (the plan's
+    6-resource list didn't include it, since role assignment was meant to
+    be a field on `UserResource`) — it became the actual mechanism for role
+    assignment once the field approach didn't pan out. `user`/`role`
+    `belongs_to` fields, confirmed working.
+  - `driver.rb`/`truck.rb`/`driver_truck.rb`/`visit.rb`: unchanged from
+    their auto-generated state — already correct.
+
+### Deviations discovered during execution
+
+- **`avo-authorization` (Avo 4's Pundit integration) is a paid plugin, not
+  on public RubyGems.** `docs/plan.md` assumed Avo 3's free, built-in Pundit
+  integration (`authorization_client = :pundit` "just works"). In Avo 4,
+  `Avo.configuration.authorization_enabled?` requires `Avo.plugin_manager
+  .installed?("avo-authorization")` to be true, and that gem is grouped in
+  Avo's own packaging tooling alongside `avo-pro`/`avo-advanced`/
+  `avo-dashboards` — i.e. it's part of the paid tier, not something
+  `bundle install` can even fetch. **Discussed with the user and explicitly
+  decided**: use a single gate only (`authenticate_with`, admin-only mount
+  access) rather than purchase a license. The Pundit scaffolding
+  (`RolePolicy`/`UserPolicy`/`DriverTruckPolicy`/`UserRolePolicy`,
+  `ApplicationPolicy`'s `avo_*` methods) was kept anyway — it's dormant
+  (Avo never calls it without the plugin) but ready to activate for free if
+  the license is ever purchased, since only `admin` ever reaches `/admin` in
+  the first place (the other three roles — `registration_operator`/
+  `expedition_operator`/`queue_operator` — were never meant to use Avo at
+  all; they're fully unaffected and keep using their own Phase 2–5 screens
+  either way).
+- **`bin/rails generate avo:install` claims to add the `mount_avo` route
+  but doesn't.** The generator's own output said `route mount_avo`, but
+  `config/routes.rb` was left unchanged (possibly related to the file's
+  CRLF line endings on this Windows checkout defeating the generator's
+  insertion-point regex — unconfirmed). Added `mount_avo` to `routes.rb`
+  by hand.
+- **`field :roles, as: :has_many, through: :user_roles` (and
+  `as: :has_and_belongs_to_many`) render an empty lazy-loaded turbo-frame**
+  for this has-many-through association — confirmed two ways: (1) fetching
+  the frame's own URL directly returned no field content, and (2) a real
+  headless-Chromium session (Cuprite, see below) loaded the edit page,
+  waited for the frame to settle, and found zero checkboxes/role text in
+  the live DOM. Root cause wasn't tracked down (possibly another
+  paid-tier-gated feature, similar to `avo-authorization` — or a genuine
+  bug in this Avo version). **Pivoted the design**: role assignment happens
+  by creating/deleting `UserRole` records directly through a restored
+  `Avo::Resources::UserRole` (`user`/`role` `belongs_to` fields), confirmed
+  working end-to-end. This is one extra click compared to a checkbox
+  multi-select on the user form, but it's real, tested functionality
+  instead of a silently-broken field.
+- **Standing up Capybara + Cuprite for the first time** (deferred since
+  Phase 1, needed here to determine the above field-rendering truth since
+  raw HTTP couldn't distinguish "broken field" from "lazy-loaded, needs a
+  real browser") **surfaced two more environment issues**, both worth
+  knowing for Phase 9 when system specs become the explicit focus:
+  - Ferrum/Cuprite's browser auto-detection didn't find the container's
+    chromium and hung until `Ferrum::ProcessTimeoutError`; passing
+    `browser_path: "/usr/bin/chromium"` explicitly to the Cuprite driver
+    fixed it.
+  - Even with `browser_path` fixed, running the same driver **through
+    RSpec** (`bundle exec rspec spec/system/...`) still hit
+    `Ferrum::ProcessTimeoutError` on every example, while the identical
+    driver config worked perfectly in a plain `bin/rails runner` script
+    outside RSpec. Root cause not found (suspect RSpec/webmock/VCR
+    interfering with Ferrum's subprocess stdout-pipe reading, but
+    unconfirmed). **The one system spec file written to investigate this
+    (`spec/system/avo_admin_spec.rb`) was deleted** rather than left
+    permanently failing/pending, since the final `UserRole`-based design
+    turned out not to need JS at all — a plain `type: :request` spec fully
+    covers it (see `spec/requests/admin/avo_spec.rb`). Also needed for the
+    manual investigation: `WebMock.disable_net_connect!(allow_localhost:
+    true)` plus VCR's `config.ignore_localhost = true` (added to
+    `spec/support/vcr.rb` — harmless to keep, and will be needed again the
+    moment Phase 9 adds real system specs).
+- **`root_path` (the bare route helper) resolves to Avo's engine-internal
+  root, not the app's `/`, specifically inside RSpec request specs** — a
+  fresh `bin/rails runner` script confirms `root_path` correctly returns
+  `/` outside of RSpec, so this is some interaction between how the full
+  app boots under RSpec and the mounted engine's own `root` route (not
+  fully root-caused). Request specs touching this now assert against the
+  literal `"/"` path instead of the `root_path` helper to sidestep it. Not
+  a production bug — `main_app.root_path` in the actual `authenticate_with`
+  block was always correct and verified via real HTTP/browser sessions.
+- **Avo's own default behavior**: visiting `/admin` itself (with no
+  dashboard or `config.home_path` configured) redirects to the first
+  resource in the sidebar (`/admin/resources/driver_trucks` here) rather
+  than rendering a 200 directly — expected Avo behavior, not a bug; the
+  admin-access spec asserts against this instead of expecting `:ok`.
+- pt-BR locale quirks hit while manually driving the UI: Devise's sign-in
+  submit button is labeled "Login" (not "Log in"), and Avo's save button is
+  labeled "Salvar" (not "Save") — only relevant to ad hoc verification
+  scripts, not app code.
+
+### How to verify
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 144 examples, 0 failures
+docker compose run --rm web bin/rubocop                          # clean except pre-existing Phase 1 offenses
+docker compose run --rm web bin/brakeman -q                      # 0 warnings
+```
+
+Verified manually end-to-end against the live dev stack (via a real
+Cuprite/headless-Chromium session driving the actual browser, not just
+HTTP): signed in as a newly-created `registration_operator` role (assigned
+through Avo's `UserRole` resource by an admin) and confirmed they land on
+and can use `/registration/visits` (the "Check-in" screen) — the full
+"admin creates a user, assigns a role, that user logs into their screen"
+flow from the phase's verify step.
+
 ## Next step
 
-**Phase 8** — Avo admin panel: mount Avo at `/admin`, wire up
-`authorization_client = :pundit` with remapped action names (`avo_index?`,
-`avo_update?`, etc. — see the Phase 1 deviation note on Avo resolving to
-v4.x, not the 3.x the original plan assumed, since its config/authorization
-syntax may differ), `UserResource` exposing role assignment. *Verify*: a
-non-admin is redirected away from `/admin`; an admin can create a user and
-assign a role, and that user can log in to the corresponding screen. See
+**Phase 9** — Test coverage + styling: close spec gaps (including finally
+standing up real Capybara + Cuprite system specs — see this phase's
+deviations for the Ferrum/RSpec timeout issue to resolve first), a
+`tokens.css` pass (colors/spacing/typography as custom properties), and a
+responsive large-typography layout for the yard monitor (`public/queue`).
+*Verify*: `bundle exec rspec` green (including new system specs). See
 details in [`docs/plan.md`](plan.md#build-phases-incremental-milestones).

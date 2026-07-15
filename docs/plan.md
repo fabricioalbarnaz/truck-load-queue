@@ -121,7 +121,9 @@ app/jobs/send_notification_job.rb
 - `ApplicationPolicy` base with an `admin?` helper.
 - `VisitPolicy` with domain actions: `check_in?` (registration_operator), `issue_order?` (expedition_operator), `finish?` (queue_operator), always also allowed for `admin`.
 - Avo 3 integrates natively with Pundit (`authorization_client = :pundit`). Methods are remapped (`avo_index?`, `avo_update?`, etc.) to avoid colliding with the domain actions on the policies — only `admin` can reach `/admin`, with a double gate: `authenticate_with` at the mount point + per-resource policy.
+  - **Phase 8 deviation**: the actual installed gem resolved to Avo 4.x (flagged as a risk back in Phase 1), and in Avo 4 the Pundit integration moved into a separate paid plugin (`avo-authorization`, not on public RubyGems). Decided with the user to skip it rather than buy a license — the single `authenticate_with` gate (admin-only) is what's actually implemented; the `avo_*` policy methods described above exist and are ready to use, but are currently dormant. See `docs/progress.md`'s Phase 8 section for the full reasoning.
 - `UserResource` in Avo exposes `roles` assignment (multi-select field) — this is the requested "permission management."
+  - **Phase 8 deviation**: a multi-select field on `UserResource` (`has_many`/`has_and_belongs_to_many` through `user_roles`) rendered as a permanently-empty lazy-loaded frame in the installed Avo version — confirmed via a real headless-browser check. Role assignment instead happens through a (restored) `Avo::Resources::UserRole`, using plain `belongs_to` fields, which do work. See `docs/progress.md`'s Phase 8 section.
 
 ## Docker
 
@@ -156,7 +158,7 @@ app/controllers/queue_screen/visits_controller.rb  # Ruby's core `Queue` class b
 app/controllers/public/queue_controller.rb
 app/views/{registration,expedition,queue,public}/**/*.html.erb
 app/assets/stylesheets/tokens.css, application.css, components/*.css
-app/avo/resources/{user,role,driver,truck,driver_truck,visit}_resource.rb
+app/avo/resources/{user,role,driver,truck,driver_truck,user_role,visit}.rb  # Avo::Resources::X, not X_Resource — Avo 4 naming
 config/initializers/{devise,avo,twilio,sidekiq}.rb
 config/locales/{pt-BR,devise.pt-BR}.yml
 db/migrate/*, db/seeds.rb (4 roles + 1 admin user)
@@ -189,7 +191,7 @@ As part of Phase 1, a `docs/` folder is created at the project root containing:
 5. **Queue screen**: `FinishLoadingService` + `PromoteNextService`, `QueueScreen::VisitsController` (module named to avoid colliding with Ruby's core `Queue` class; URL is still `/queue`). *Verify*: finishing promotes the correct next visit by `order_issued_at`.
 6. **Public real-time screen**: `Public::QueueController` + Turbo Streams broadcast. *Verify*: two open tabs, an action in one reflects in the other without a refresh.
 7. **Notifications**: Dispatcher + adapters + Sidekiq job, fired when entering `loading`. *Verify*: `TestAdapter` logs in dev; VCR-backed specs pass without hitting the real network.
-8. **Avo admin panel**: resources for all 6 models, Pundit integration, role assignment. *Verify*: a non-admin is redirected away from `/admin`; an admin can create a user and assign a role.
+8. **Avo admin panel**: resources for all 7 models (including `UserRole`, restored after the plan's original 6-resource list didn't pan out — see deviation above), single-gate admin-only authentication (no Pundit integration — paid plugin in the installed Avo version), role assignment via the `UserRole` resource. *Verify*: a non-admin is redirected away from `/admin`; an admin can create a user, assign a role via `UserRole`, and that user can log in to the corresponding screen.
 9. **Test coverage + styling**: close spec gaps, `tokens.css` pass (colors/spacing/typography as custom properties), responsive layout for the yard monitor (large typography). *Verify*: `bundle exec rspec` green.
 10. **Production hardening**: multi-stage Dockerfile, non-root user, secrets via `RAILS_MASTER_KEY`, healthchecks.
 

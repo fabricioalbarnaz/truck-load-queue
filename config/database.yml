@@ -84,15 +84,12 @@ production:
     database: app_production
     username: app
     password: <%= ENV["APP_DATABASE_PASSWORD"] %>
-  cache:
-    <<: *primary_production
-    database: app_production_cache
-    migrations_paths: db/cache_migrate
-  queue:
-    <<: *primary_production
-    database: app_production_queue
-    migrations_paths: db/queue_migrate
-  cable:
-    <<: *primary_production
-    database: app_production_cable
-    migrations_paths: db/cable_migrate
+  # No `cache`/`queue`/`cable` secondary databases here — those are Rails 8's
+  # default scaffolding for solid_cache/solid_queue/solid_cable, but this
+  # app uses Sidekiq (jobs) and Action Cable's redis adapter (see
+  # config/cable.yml) instead of solid_queue/solid_cable, and solid_cache
+  # was never actually wired up (no config/cache.yml, no schema). Rails'
+  # `db:prepare` iterates every database listed here — leaving these in
+  # would try to create/migrate databases pointing at migration paths
+  # (db/queue_migrate, db/cable_migrate, db/cache_migrate) that don't
+  # exist, breaking production boot.

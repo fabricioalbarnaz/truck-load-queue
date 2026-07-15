@@ -21,7 +21,7 @@ the design reference.
 | 7 | Notifications (SMS/WhatsApp via Twilio) | ✅ Done |
 | 8 | Admin panel (Avo) | ✅ Done |
 | 9 | Test coverage + styling | ✅ Done |
-| 10 | Production hardening | ⏳ Not started |
+| 10 | Production hardening | ✅ Done |
 
 ---
 
@@ -1021,14 +1021,129 @@ screen, the drivers table (with the danger-styled "Remover" button), and
 the public queue yard-monitor screen (large green "loading now" text on a
 dark background, readable at a glance).
 
-## Next step
+## Phase 10 — Production hardening (done)
 
-**Phase 10** — Production hardening: multi-stage `Dockerfile` review (it
-already exists from Phase 1's `rails new`, but hasn't been revisited since),
-non-root user, secrets via `RAILS_MASTER_KEY`, healthchecks,
-`RAILS_LOG_TO_STDOUT`, and a final pass confirming `config/environments/
-production.rb` settings (Action Cable's Redis adapter, force_ssl, etc.) are
-actually correct for a real deploy target. *Verify*: production image
-builds and boots cleanly; see `docs/plan.md`'s "End-to-end verification"
-checklist for the full manual pass. See details in
-[`docs/plan.md`](plan.md#build-phases-incremental-milestones).
+Most of this phase's headline items (multi-stage `Dockerfile`, non-root
+user, `RAILS_MASTER_KEY`-based secrets) already existed untouched since
+Phase 1's `rails new` scaffold — this phase's real work was **actually
+building and booting the production image against real Postgres/Redis**,
+which surfaced concrete bugs that had been sitting latent since Phase 1
+because nothing had ever exercised `RAILS_ENV=production` before.
+
+### What was created / changed
+
+- **`Dockerfile`**: added `HEALTHCHECK --interval=30s --timeout=5s
+  --start-period=30s --retries=3 CMD curl -f http://localhost:3000/up ||
+  exit 1`. Only meaningful for the web role — see the worker deviation
+  below.
+- **`config/database.yml`**: removed the `production:` block's `cache`/
+  `queue`/`cable` secondary-database entries entirely (kept only
+  `primary`) — see deviation below, this was a genuine boot-blocking bug.
+- **`config/puma.rb`**: removed the dead `plugin :solid_queue if
+  ENV["SOLID_QUEUE_IN_PUMA"]` line — misleading leftover referencing a gem
+  that was removed back in Phase 1.
+- **`config/environments/production.rb`**: uncommented `config.ssl_options
+  = { redirect: { exclude: ->(request) { request.path == "/up" } } }` —
+  without it, `force_ssl` would 301-redirect the plain-HTTP healthcheck
+  request instead of returning 200.
+- **`.env.example`**: added a "Production only" section documenting
+  `RAILS_MASTER_KEY`, `DATABASE_URL`/`APP_DATABASE_PASSWORD`, `REDIS_URL`,
+  `ADMIN_EMAIL`/`ADMIN_PASSWORD` — previously only documented the Twilio
+  vars from Phase 7.
+- **`CLAUDE.md`**: added a "Production" section with the exact `docker
+  build`/`docker run` commands for both the web and worker roles (verified
+  against real containers, not just written from memory).
+
+### Deviations / bugs found during execution
+
+- **`config/database.yml`'s `production:` block would have broken
+  production boot.** It still had Rails 8's default `cache`/`queue`/
+  `cable` secondary-database entries (`app_production_cache`,
+  `app_production_queue`, `app_production_cable`, with `migrations_paths:
+  db/{cache,queue,cable}_migrate`) — scaffolding for solid_cache/
+  solid_queue/solid_cable. `solid_queue`/`solid_cable` were deliberately
+  removed from the Gemfile back in Phase 1 (Sidekiq + Action Cable's redis
+  adapter used instead, per `docs/plan.md`), and `solid_cache`, while kept
+  in the Gemfile, was **never actually finished being wired up** — no
+  `config/cache.yml`, no `solid_cache_entries` table in `db/schema.rb`.
+  None of the three `db/*_migrate` directories these entries pointed at
+  exist. `bin/docker-entrypoint` runs `db:prepare` on every web-container
+  boot, which iterates *every* database listed for the current
+  environment — this would have tried to create/migrate three databases
+  pointing at nonexistent migration paths on first real deploy. Caught by
+  actually building and running the image (see below), not by reading the
+  file — this had been sitting latent since Phase 1 with no phase ever
+  exercising `RAILS_ENV=production` end-to-end. Fixed by deleting the three
+  entries; `solid_cache` stays in the Gemfile per the standing Phase 1
+  decision, but Rails.cache falls back to its default store until someone
+  actually finishes wiring it up (not needed yet — nothing in the app uses
+  `Rails.cache` today).
+- **The `HEALTHCHECK` is web-role-specific but the image is shared with
+  the worker role** (same pattern `docker-compose.yml` already uses for
+  dev — one image, `command:` override for Sidekiq). A worker container
+  never binds port 3000, so the baked-in `curl .../up` healthcheck would
+  always report unhealthy for it. No good way to make one `HEALTHCHECK`
+  correct for both roles from inside the Dockerfile itself (the role isn't
+  known until `docker run`'s command override), so the fix is operational,
+  not code: run worker containers with `--no-healthcheck` (documented in
+  `CLAUDE.md`'s new Production section) rather than relying on the image's
+  default.
+- **`RAILS_LOG_TO_STDOUT` needed no code change** — `config.logger =
+  ActiveSupport::TaggedLogging.logger(STDOUT)` in `production.rb` already
+  logs to STDOUT unconditionally (not gated behind an env var check like
+  some Rails templates), which already satisfies the "log to STDOUT"
+  requirement from `docs/plan.md`'s Docker section.
+
+### How to verify
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 154 examples, 0 failures
+docker compose run --rm web bin/rubocop                          # clean except pre-existing Phase 1 offenses
+docker compose run --rm web bin/brakeman -q                      # 0 warnings
+```
+
+Verified manually end-to-end (not just `docker build` succeeding) against
+the real `db`/`redis` services from `docker-compose.yml`:
+
+```bash
+docker build -t truck-load-queue-prod .
+
+# web role
+docker run -d --network truck-load-queue_default \
+  -e RAILS_MASTER_KEY="$(cat config/master.key)" \
+  -e DATABASE_URL="postgres://postgres:password@db:5432" \
+  -e REDIS_URL="redis://redis:6379/0" \
+  -p 3001:3000 --name prod-smoke-web truck-load-queue-prod
+
+# worker role, same image
+docker run -d --network truck-load-queue_default \
+  -e RAILS_MASTER_KEY="$(cat config/master.key)" \
+  -e DATABASE_URL="postgres://postgres:password@db:5432" \
+  -e REDIS_URL="redis://redis:6379/0" \
+  --no-healthcheck --name prod-smoke-worker truck-load-queue-prod bundle exec sidekiq
+```
+
+Confirmed: `db:prepare` created `app_production` and seeded the 4 roles +
+admin user on first boot; Puma started correctly in production mode;
+`GET /up` and `GET /users/sign_in` both returned 200 over plain HTTP
+(confirming the `force_ssl`/`/up` exclusion fix); Docker's own
+`HEALTHCHECK` reported `healthy` after the 30s start period; a full
+sign-in round-trip (CSRF token → POST credentials → 303 → authenticated
+`GET /` → 200) worked correctly even with `force_ssl`/`assume_ssl` active;
+the worker container connected to Redis and booted Sidekiq cleanly without
+re-running `db:prepare` (confirming `bin/docker-entrypoint`'s command-match
+guard works as intended). Both smoke-test containers were stopped and
+removed after verification.
+
+## Project status
+
+All 10 phases from `docs/plan.md` are now complete. Remaining work is
+listed in that file's "Future improvements" section (visit cancellation,
+`:order_issued`/`:getting_close` notifications, multi-site support, `en`
+locale) — none of it blocking, all explicitly out of v1 scope by design.
+A genuinely production deploy (as opposed to this phase's local
+Docker-network smoke test) would still need: a real Postgres/Redis host,
+`config.hosts` set to the real domain (currently unset/permissive — see
+the commented block in `config/environments/production.rb`), a real
+`RAILS_MASTER_KEY` provisioned outside version control, and real Twilio
+credentials.

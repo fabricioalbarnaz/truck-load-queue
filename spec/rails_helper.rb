@@ -45,7 +45,12 @@ RSpec.configure do |config|
   # If you're not using ActiveRecord, or you'd prefer not to run each of your
   # examples within a transaction, remove the following line or assign false
   # instead of true.
-  config.use_transactional_fixtures = true
+  # DatabaseCleaner (spec/support/database_cleaner.rb) handles cleanup for
+  # every spec type instead — system specs need real commits (a separate
+  # Capybara server thread can't see an uncommitted wrapping transaction),
+  # so a single consistent mechanism is used everywhere rather than mixing
+  # Rails' transactional fixtures with DatabaseCleaner only for :system.
+  config.use_transactional_fixtures = false
 
   # You can uncomment this line to turn off ActiveRecord support entirely.
   # config.use_active_record = false

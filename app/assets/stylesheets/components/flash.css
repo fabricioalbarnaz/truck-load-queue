@@ -1,0 +1,17 @@
+.flash {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  margin: 0 0 var(--space-4);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.flash-notice {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.flash-alert {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}

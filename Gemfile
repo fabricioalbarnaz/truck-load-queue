@@ -75,5 +75,6 @@ group :test do
   gem "cuprite"
   gem "webmock"
   gem "vcr"
+  gem "database_cleaner-active_record"
 end
 

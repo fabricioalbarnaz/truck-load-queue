@@ -1,0 +1,60 @@
+.btn,
+input[type="submit"],
+button:not(.btn-plain) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-primary-contrast);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.btn:hover,
+input[type="submit"]:hover,
+button:not(.btn-plain):hover {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+}
+
+/* Same specificity as the base `button:not(.btn-plain)` rule above
+   (element + one class each), so source order decides and these win. */
+button.btn-secondary,
+a.btn-secondary,
+input.btn-secondary {
+  background: transparent;
+  color: var(--color-primary);
+}
+
+button.btn-secondary:hover,
+a.btn-secondary:hover,
+input.btn-secondary:hover {
+  background: var(--color-bg);
+}
+
+button.btn-danger,
+a.btn-danger,
+input.btn-danger {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+button.btn-danger:hover,
+a.btn-danger:hover,
+input.btn-danger:hover {
+  background: var(--color-danger);
+  opacity: 0.9;
+}
+
+/* `button_to` wraps its button in a form; keep the form from adding its own block spacing */
+form.button_to {
+  display: inline-block;
+  margin: 0;
+}

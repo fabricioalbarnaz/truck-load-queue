@@ -1,0 +1,99 @@
+/*
+ * The public/queue screen is a yard monitor — a physical display read from
+ * a distance, not a desktop UI. Large type, high contrast, no chrome.
+ * Deliberately does NOT use `.page`/tokens' light surface colors: this
+ * screen always renders dark-on-... regardless of the viewer's OS theme,
+ * since it's a fixed board, not a personal device.
+ */
+
+body:has(#public_queue) {
+  background: #0b0e14;
+  color: #f2f4f8;
+}
+
+#public_queue {
+  min-height: 100vh;
+  padding: var(--space-8) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+#public_queue h1 {
+  font-size: clamp(2rem, 4vw, 3rem);
+  text-align: center;
+  margin: 0;
+  letter-spacing: 0.02em;
+  color: #f2f4f8;
+}
+
+#public_queue h2 {
+  font-size: clamp(1.25rem, 2vw, 1.75rem);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8b96a8;
+  margin: 0 0 var(--space-4);
+}
+
+#public_queue section {
+  background: #161b24;
+  border: 1px solid #262e3d;
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+}
+
+#public_queue section:first-of-type p {
+  font-size: clamp(2.5rem, 7vw, 5rem);
+  font-weight: 700;
+  text-align: center;
+  margin: 0;
+  color: #58e08a;
+}
+
+#public_queue section:first-of-type p:only-child:empty::before,
+#public_queue section:first-of-type p.empty {
+  color: #8b96a8;
+  font-size: clamp(1.5rem, 3vw, 2.25rem);
+  font-weight: 400;
+}
+
+#public_queue ol {
+  list-style: none;
+  counter-reset: queue-position;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+#public_queue ol li {
+  counter-increment: queue-position;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: clamp(1.25rem, 2.5vw, 2rem);
+  padding: var(--space-3) var(--space-4);
+  background: #0b0e14;
+  border-radius: var(--radius-md);
+}
+
+#public_queue ol li::before {
+  content: counter(queue-position);
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: var(--color-primary-contrast);
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+#public_queue .empty-state {
+  color: #8b96a8;
+  font-size: clamp(1.25rem, 2.5vw, 1.75rem);
+  text-align: center;
+}

@@ -1,0 +1,75 @@
+/*
+ * Design tokens — CSS custom properties. Change values here to re-theme
+ * the whole app; component stylesheets should only ever reference var(...),
+ * never hardcode colors/spacing/type sizes directly.
+ */
+:root {
+  /* Color: neutrals */
+  --color-bg: #f4f5f7;
+  --color-surface: #ffffff;
+  --color-border: #dde1e6;
+  --color-text: #1c2128;
+  --color-text-muted: #57606a;
+
+  /* Color: brand / actions */
+  --color-primary: #1f4fd8;
+  --color-primary-hover: #1a3fb0;
+  --color-primary-contrast: #ffffff;
+
+  /* Color: status */
+  --color-success: #16794f;
+  --color-success-bg: #e4f6ee;
+  --color-danger: #b3261e;
+  --color-danger-bg: #fbe9e8;
+  --color-warning: #8a5a00;
+  --color-warning-bg: #fff3dc;
+
+  /* Spacing scale */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-8: 3rem;
+
+  /* Typography */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-size-sm: 0.875rem;
+  --font-size-base: 1rem;
+  --font-size-lg: 1.25rem;
+  --font-size-xl: 1.5rem;
+  --font-size-2xl: 2rem;
+  --line-height-base: 1.5;
+
+  /* Shape */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 1rem;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-md: 0 4px 12px rgba(16, 24, 40, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #14171c;
+    --color-surface: #1c2027;
+    --color-border: #30363d;
+    --color-text: #e6e8eb;
+    --color-text-muted: #9aa4b2;
+
+    --color-primary: #6f92ff;
+    --color-primary-hover: #90aaff;
+    --color-primary-contrast: #0b0e14;
+
+    --color-success: #4fd39a;
+    --color-success-bg: #10281f;
+    --color-danger: #ff8b83;
+    --color-danger-bg: #34110f;
+    --color-warning: #ffcf7a;
+    --color-warning-bg: #332203;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
+  }
+}

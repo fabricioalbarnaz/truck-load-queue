@@ -140,7 +140,7 @@ The final project phase includes production hardening: multi-stage Dockerfile, n
 - **Policies**: one spec per policy using `pundit-matchers`, covering all 4 roles + unauthenticated.
 - **Services** (highest value): `CheckInService`, `IssueOrderService` (empty vs non-empty queue), `FinishLoadingService` (promotes the next visit by `order_issued_at`, not creation order), `Notifications::Dispatcher` (sms/whatsapp/both routing).
 - **Request specs**: one per controller/role — 302 if unauthenticated, 302/403 if wrong role, 200 + correct state change if authorized. Includes `public/queue` with no auth.
-- **System specs** (Capybara + Cuprite, JS enabled): full flow check-in → issue order → finish, using two simultaneous Capybara sessions (one operator, one "public") to observe the Turbo Stream update genuinely live.
+- **System specs** (Capybara + Cuprite, JS enabled): full flow check-in → issue order → finish, using two simultaneous Capybara sessions (one operator, one "public") to observe the Turbo Stream update genuinely live. Implemented in Phase 9 as `spec/system/visit_lifecycle_spec.rb` — see `docs/progress.md`'s Phase 9 section for the driver-name collision, `DatabaseCleaner` requirement, and other gotchas hit getting this infrastructure working. Register the Cuprite driver under a name other than `:cuprite` (e.g. `:app_cuprite`) — `capybara-cuprite`'s own default `:cuprite` registration wins over a same-named override under full RSpec/Rails boot.
 - Twilio adapters are tested in isolation with `webmock`/`vcr`; everything else uses `TestAdapter`/spies.
 
 ## File structure (key files)
@@ -192,7 +192,7 @@ As part of Phase 1, a `docs/` folder is created at the project root containing:
 6. **Public real-time screen**: `Public::QueueController` + Turbo Streams broadcast. *Verify*: two open tabs, an action in one reflects in the other without a refresh.
 7. **Notifications**: Dispatcher + adapters + Sidekiq job, fired when entering `loading`. *Verify*: `TestAdapter` logs in dev; VCR-backed specs pass without hitting the real network.
 8. **Avo admin panel**: resources for all 7 models (including `UserRole`, restored after the plan's original 6-resource list didn't pan out — see deviation above), single-gate admin-only authentication (no Pundit integration — paid plugin in the installed Avo version), role assignment via the `UserRole` resource. *Verify*: a non-admin is redirected away from `/admin`; an admin can create a user, assign a role via `UserRole`, and that user can log in to the corresponding screen.
-9. **Test coverage + styling**: close spec gaps, `tokens.css` pass (colors/spacing/typography as custom properties), responsive layout for the yard monitor (large typography). *Verify*: `bundle exec rspec` green.
+9. **Test coverage + styling**: close spec gaps, `tokens.css` pass (colors/spacing/typography as custom properties), responsive layout for the yard monitor (large typography). *Verify*: `bundle exec rspec` green. The public queue screen uses its own layout (`layouts/public.html.erb`, no header/nav, always-dark) rather than the app's normal one, since it's a physical yard-monitor display, not a desktop page.
 10. **Production hardening**: multi-stage Dockerfile, non-root user, secrets via `RAILS_MASTER_KEY`, healthchecks.
 
 ## Future improvements (out of v1 scope)

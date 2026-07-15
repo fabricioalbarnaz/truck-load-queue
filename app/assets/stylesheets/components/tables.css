@@ -1,0 +1,31 @@
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: var(--space-6);
+}
+
+th,
+td {
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+th {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr:hover {
+  background: var(--color-bg);
+}

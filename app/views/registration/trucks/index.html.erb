@@ -21,7 +21,7 @@
         <td><%= truck.active? ? "Sim" : "Não" %></td>
         <td>
           <%= link_to "Editar", edit_registration_truck_path(truck) %>
-          <%= button_to "Remover", registration_truck_path(truck), method: :delete, form: { data: { turbo_confirm: "Remover este caminhão?" } } %>
+          <%= button_to "Remover", registration_truck_path(truck), method: :delete, class: "btn-danger", form: { data: { turbo_confirm: "Remover este caminhão?" } } %>
         </td>
       </tr>
     <% end %>

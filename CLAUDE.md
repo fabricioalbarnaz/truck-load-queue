@@ -14,12 +14,18 @@ phases). **Read `docs/progress.md` second** — it is the execution log, updated
 completed phase, showing what's actually implemented vs. still planned, and documents deviations
 from the plan discovered along the way (e.g. Avo resolved to v4.x, not the 3.x the plan assumed).
 
-Only Phase 1 (skeleton: Rails + Docker + Devise + Pundit + roles) is done as of now. Phases 2–10
-(Driver/Truck registration, Visit/check-in, dispatch, queue, public Turbo Streams screen,
-notifications, Avo admin, test/styling pass, production hardening) are not started — most
-model/controller/service paths described in `docs/plan.md`'s "File structure" section don't exist
-yet. Don't assume any file under `app/services`, `app/avo`, or role-namespaced controllers exists
-without checking.
+All 10 phases are done (skeleton; Driver/Truck registration; Visit/check-in; dispatch; queue;
+public Turbo Streams screen; notifications; Avo admin; test/styling pass; production hardening) —
+this is a complete v1, not a work-in-progress. See `docs/progress.md` for the full execution log,
+including deviations from `docs/plan.md` discovered along the way (e.g. Avo resolved to v4.x, not
+the 3.x the plan assumed; the `Queue::` module was renamed to `QueueScreen::` because it collides
+with Ruby's stdlib `Queue` class; Avo's Pundit integration, `avo-authorization`, turned out to be a
+paid plugin, so `/admin` uses a single admin-only `authenticate_with` gate instead). Remaining work
+is explicitly out of v1 scope — see `docs/plan.md`'s "Future improvements" section (visit
+cancellation, additional notification events, multi-site support, `en` locale) and
+`docs/progress.md`'s "Project status" section (what a real production deploy would still need:
+real Postgres/Redis host, `config.hosts`, a provisioned `RAILS_MASTER_KEY`, real Twilio
+credentials).
 
 When completing a phase, update `docs/progress.md` (status table + a new phase section) the same
 way Phase 1 was documented, so the next session can resume without rebuilding context.
@@ -120,11 +126,12 @@ docker run -d \
 - **Jobs/Cable**: Sidekiq + Redis (`config.active_job.queue_adapter = :sidekiq`), not Rails 8's
   default solid_queue/solid_cable — those were deliberately removed from the Gemfile in favor of
   Redis, along with `kamal`/`thruster`.
-- **Notifications** (Phase 7, not built yet): adapter pattern behind
-  `Rails.application.config.x.notifications.adapter_class` — a `TestAdapter` in dev/test so no
-  real SMS/WhatsApp is ever sent accidentally outside production.
+- **Notifications**: adapter pattern behind `Rails.application.config.x.notifications.adapter_class`
+  (`app/models/notifications/`) — a `TestAdapter` in dev/test so no real SMS/WhatsApp is ever sent
+  accidentally outside production; real `TwilioSmsAdapter`/`TwilioWhatsappAdapter` in production.
+  Triggered from `Visits::IssueOrderService`/`Visits::PromoteNextService`, not a model callback.
 - **Queue position is derived, not stored** — computed from `order_issued_at` ordering to avoid
-  desync bugs (see `docs/plan.md` for the exact scope/method once `Visit` exists).
+  desync bugs (`Visit#queue_position` / `Visit.active_queue` in `app/models/visit.rb`).
 - Two Dockerfiles: `Dockerfile` (production, multi-stage, non-root, Rails-generated) vs.
   `Dockerfile.dev` (used by `docker-compose.yml`, all gem groups + Chromium, source bind-mounted).
 

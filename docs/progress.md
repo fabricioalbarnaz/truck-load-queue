@@ -1135,6 +1135,103 @@ re-running `db:prepare` (confirming `bin/docker-entrypoint`'s command-match
 guard works as intended). Both smoke-test containers were stopped and
 removed after verification.
 
+## Post-v1 — Inline driver/truck registration on check-in (done)
+
+Not one of the original 10 phases — a workflow change requested after v1 shipped. Previously,
+registering a new driver/truck and checking one in were three separate page visits
+(`/registration/drivers`, `/registration/trucks`, `/registration/visits`). Now the check-in page
+can do all three in one submission: the operator picks an existing driver/truck from the dropdowns
+as before, or fills in "cadastrar novo motorista"/"cadastrar novo caminhão" fields instead, and the
+new record(s) plus the visit are created together. The standalone `/registration/drivers` and
+`/registration/trucks` CRUD pages are unchanged and still exist for managing/pre-registering records
+outside of check-in.
+
+### What was created / changed
+
+- **`Visits::CheckInService`** (`app/services/visits/check_in_service.rb`): now wraps
+  driver-save + truck-save + pairing + visit-save in `ActiveRecord::Base.transaction`, with a
+  `save_if_new` helper (`record.new_record? ? record.save : true`) so it transparently accepts
+  either an already-persisted `driver:`/`truck:` (unchanged existing behavior) or an unsaved
+  `Driver.new(...)`/`Truck.new(...)` built from form params. `raise ActiveRecord::Rollback` on any
+  failed save undoes DB writes without clearing `.errors` or propagating out of `#call` — return
+  contract (`Visit`, possibly invalid, never raises) is unchanged. Because Ruby passes objects by
+  reference, the controller's `@new_driver`/`@new_truck` and the service's `@driver`/`@truck` are
+  the same objects, so validation errors land directly on what the view already renders — no form
+  object or result wrapper needed.
+- **`Registration::VisitsController`**: `visit_params` now permits `new_driver: %i[name cpf phone
+  notification_channel]` and `new_truck: %i[plate model capacity]` alongside the existing
+  `:driver_id`/`:truck_id`. `create` builds `@new_driver`/`@new_truck` from those nested params
+  first, then picks `driver_id.presence ? Driver.find(...) : @new_driver` per field independently
+  (same for truck) — dropdown selection always wins if present, new-record fields are silently
+  ignored in that case. `load_form_collections` extracted (was already duplicated between `index`
+  and `create`'s failure branch; now also needs to seed `@new_driver`/`@new_truck` defaults in both
+  places).
+- **"Must pick one" validation**: deliberately no new validation code. `Driver.new({})` /
+  `Truck.new({})` fail their own existing `presence` validations (`name`/`cpf`/`phone`, `plate`)
+  when neither the dropdown nor the new-record fields are filled in, producing per-field messages
+  under the relevant fieldset. Accepted tradeoff: 2–3 separate blank-field messages rather than one
+  combined "select or register" message — simplest option, no new i18n key.
+- **`app/views/shared/_errors.html.erb`** (new): extracted the error-list markup that was
+  previously duplicated verbatim 3x (`registration/visits/index.html.erb`,
+  `registration/drivers/_form.html.erb`, `registration/trucks/_form.html.erb`) into
+  `render "shared/errors", record:, action_label:`. Used at those 3 original call sites plus 2 new
+  ones (`@new_driver`, `@new_truck` on the check-in page) — the check-in page now needs to surface
+  errors from up to three models in one render, which would have tripled the existing duplication.
+- **`app/views/registration/visits/index.html.erb`**: added two always-visible `<fieldset>` blocks
+  (no JS/Stimulus toggle — confirmed with the user this was the preferred UX over a
+  show/hide toggle), one below each dropdown, using `form.fields_for :new_driver, @new_driver` /
+  `:new_truck, @new_truck`. Existing `visit_driver_id`/`visit_truck_id` field ids are unchanged
+  (still top-level fields on `@visit`); new fields get non-colliding ids
+  (`visit_new_driver_name`, `visit_new_truck_plate`, etc).
+- No `authorize` calls added for `DriverPolicy`/`TruckPolicy` in the controller — `check_in?`,
+  `DriverPolicy#create?`, `TruckPolicy#create?` all resolve to the same `registration_or_admin?`
+  check today, so it would be pure noise; `ApplicationController` has no `verify_authorized`
+  safeguard to trip either way.
+- No schema/migration changes — all needed columns already existed on `drivers`/`trucks`/
+  `driver_trucks`/`visits`.
+- Specs added: `spec/services/visits/check_in_service_spec.rb` (new driver only, new truck only,
+  both new, each invalid variant, and a rollback-specific assertion — `Driver.count` unchanged when
+  a valid new driver is paired with an invalid new truck, the case that actually exercises the
+  transaction); `spec/requests/registration/visits_spec.rb` (new-driver/new-truck happy paths, both
+  new, partial failure with `Truck.count`/`Visit.count` unchanged, must-choose-one blank case,
+  dropdown-wins-over-garbage-new-fields precedence case); new system spec
+  `spec/system/visit_check_in_with_new_records_spec.rb` (real headless-Chromium flow: fills in new
+  driver + new truck fields, checks in, confirms both records subsequently appear on
+  `/registration/drivers` and `/registration/trucks`; plus a blank-plate validation-error case).
+  Existing `spec/system/visit_lifecycle_spec.rb` re-run and confirmed unmodified/passing (dropdown
+  field ids didn't change).
+
+### Deviations / gotchas discovered during execution
+
+- **Two new request specs initially failed from the same "`let` evaluated too late" trap
+  documented in Phase 9's log** — referencing `driver.id`/`truck.id` for the first time *inside* an
+  `expect { post ... }.not_to change(Driver, :count)` block triggers that `let`'s `create(:driver)`
+  at that exact point, so the count assertion picks up the fixture's own creation rather than
+  anything the controller did. Fixed the same way Phase 9 did: force eager evaluation
+  (`driver_id = driver.id` before the `expect` block) rather than referencing the `let` inline at
+  first use inside the observed block.
+- `accepts_nested_attributes_for` was deliberately not used — `driver`/`truck` are independent,
+  shared, pre-existing-or-not entities referenced via `belongs_to`, not `Visit`-owned children, and
+  the "use existing OR build new, per-association independently" branching doesn't map onto
+  `accepts_nested_attributes_for`'s `reject_if`/`_destroy` vocabulary. `form.fields_for :new_driver,
+  @new_driver` works fine without that macro because passing the object explicitly (rather than
+  letting `fields_for` auto-discover it from an association) only needs it for name-scoping and
+  value population, not nested-attributes config — this is the first use of `fields_for` anywhere in
+  the app.
+
+### How to verify
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 169 examples, 0 failures
+docker compose run --rm web bin/rubocop                          # clean except pre-existing offenses
+docker compose run --rm web bin/brakeman -q                      # 0 warnings
+```
+
+Verified via the new Capybara + Cuprite system spec (a real headless-Chromium browser against a real
+running Puma instance, not a request spec) rather than manual `curl`, since Phase 4's log already
+documented that raw `curl` POSTs against this app hit a CSRF-handshake quirk unrelated to app
+correctness — the system spec is the more reliable equivalent of a manual browser walkthrough.
+
 ## Project status
 
 All 10 phases from `docs/plan.md` are now complete. Remaining work is

@@ -18,8 +18,8 @@ RSpec.describe "Visit lifecycle with live public queue updates", type: :system d
 
     sign_in_via_form(registration_user)
     visit registration_visits_path
-    select driver.name, from: "visit_driver_id"
-    select truck.plate, from: "visit_truck_id"
+    fill_in "visit_driver_cpf", with: driver.cpf
+    fill_in "visit_truck_plate", with: truck.plate
     click_on "Registrar check-in"
     expect(page).to have_content(driver.name)
 

@@ -1,28 +1,71 @@
 <h1>Check-in no pátio</h1>
 
 <%= form_with model: @visit, url: registration_visits_path do |form| %>
-  <% if @visit.errors.any? %>
-    <div class="error-messages">
-      <h2><%= pluralize(@visit.errors.count, "erro") %> impede(m) o check-in:</h2>
-      <ul>
-        <% @visit.errors.each do |error| %>
-          <li><%= error.full_message %></li>
-        <% end %>
-      </ul>
+  <%= render "shared/errors", record: @visit, action_label: "check-in" %>
+
+  <fieldset>
+    <legend>Motorista</legend>
+    <p>Informe o CPF: se já estiver cadastrado, os demais dados serão carregados automaticamente.</p>
+    <%= render "shared/errors", record: @driver, action_label: "cadastro do motorista" %>
+    <div data-controller="lookup"
+         data-lookup-url-value="<%= lookup_registration_drivers_path %>"
+         data-lookup-param-value="cpf">
+      <%= form.fields_for :driver, @driver do |fd| %>
+        <div>
+          <%= fd.label :cpf, "CPF" %>
+          <%= fd.text_field :cpf, data: { lookup_target: "query", action: "blur->lookup#lookup" } %>
+          <span class="spinner" data-lookup-target="spinner" hidden></span>
+        </div>
+
+        <div>
+          <%= fd.label :name, "Nome" %>
+          <%= fd.text_field :name, data: { lookup_target: "fillable", lookup_field: "name" } %>
+        </div>
+
+        <div>
+          <%= fd.label :phone, "Telefone (E.164, ex: +5511999999999)" %>
+          <%= fd.text_field :phone, data: { lookup_target: "fillable", lookup_field: "phone" } %>
+        </div>
+
+        <div>
+          <%= fd.label :notification_channel, "Canal de notificação" %>
+          <%= fd.select :notification_channel, Driver::NOTIFICATION_CHANNELS,
+                {}, data: { lookup_target: "fillable", lookup_field: "notification_channel" } %>
+        </div>
+      <% end %>
     </div>
-  <% end %>
+  </fieldset>
 
-  <div>
-    <%= form.label :driver_id, "Motorista" %>
-    <%= form.collection_select :driver_id, @drivers, :id, :name, include_blank: true %>
+  <fieldset>
+    <legend>Caminhão</legend>
+    <p>Informe a placa: se já estiver cadastrada, os demais dados serão carregados automaticamente.</p>
+    <%= render "shared/errors", record: @truck, action_label: "cadastro do caminhão" %>
+    <div data-controller="lookup"
+         data-lookup-url-value="<%= lookup_registration_trucks_path %>"
+         data-lookup-param-value="plate">
+      <%= form.fields_for :truck, @truck do |ft| %>
+        <div>
+          <%= ft.label :plate, "Placa" %>
+          <%= ft.text_field :plate, data: { lookup_target: "query", action: "blur->lookup#lookup" } %>
+          <span class="spinner" data-lookup-target="spinner" hidden></span>
+        </div>
+
+        <div>
+          <%= ft.label :model, "Modelo" %>
+          <%= ft.text_field :model, data: { lookup_target: "fillable", lookup_field: "model" } %>
+        </div>
+
+        <div>
+          <%= ft.label :capacity, "Capacidade" %>
+          <%= ft.number_field :capacity, data: { lookup_target: "fillable", lookup_field: "capacity" } %>
+        </div>
+      <% end %>
+    </div>
+  </fieldset>
+
+  <div class="button_to visit-sumbit">
+    <%= form.submit "Registrar check-in" %>
   </div>
-
-  <div>
-    <%= form.label :truck_id, "Caminhão" %>
-    <%= form.collection_select :truck_id, @trucks, :id, :plate, include_blank: true %>
-  </div>
-
-  <%= form.submit "Registrar check-in" %>
 <% end %>
 
 <h2>Pátio</h2>

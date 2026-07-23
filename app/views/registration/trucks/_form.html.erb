@@ -1,14 +1,5 @@
 <%= form_with model: truck, url: (truck.persisted? ? registration_truck_path(truck) : registration_trucks_path) do |form| %>
-  <% if truck.errors.any? %>
-    <div class="error-messages">
-      <h2><%= pluralize(truck.errors.count, "erro") %> impede(m) o salvamento:</h2>
-      <ul>
-        <% truck.errors.each do |error| %>
-          <li><%= error.full_message %></li>
-        <% end %>
-      </ul>
-    </div>
-  <% end %>
+  <%= render "shared/errors", record: truck %>
 
   <div>
     <%= form.label :plate, "Placa" %>

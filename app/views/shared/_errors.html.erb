@@ -1,0 +1,10 @@
+<% if record.errors.any? %>
+  <div class="error-messages">
+    <h2><%= pluralize(record.errors.count, "erro") %> impede(m) o <%= local_assigns.fetch(:action_label, "salvamento") %>:</h2>
+    <ul>
+      <% record.errors.each do |error| %>
+        <li><%= error.full_message %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>

@@ -1,6 +1,8 @@
 class Driver < ApplicationRecord
   NOTIFICATION_CHANNELS = %w[sms whatsapp both].freeze
 
+  normalizes :cpf, with: ->(cpf) { cpf.to_s.gsub(/\D/, "") }
+
   encrypts :cpf, deterministic: true
   encrypts :phone, deterministic: true
 

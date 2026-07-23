@@ -5,6 +5,10 @@ class DriverPolicy < ApplicationPolicy
     registration_or_admin?
   end
 
+  def lookup?
+    registration_or_admin?
+  end
+
   def show?
     registration_or_admin?
   end

@@ -1,14 +1,5 @@
 <%= form_with model: driver, url: (driver.persisted? ? registration_driver_path(driver) : registration_drivers_path) do |form| %>
-  <% if driver.errors.any? %>
-    <div class="error-messages">
-      <h2><%= pluralize(driver.errors.count, "erro") %> impede(m) o salvamento:</h2>
-      <ul>
-        <% driver.errors.each do |error| %>
-          <li><%= error.full_message %></li>
-        <% end %>
-      </ul>
-    </div>
-  <% end %>
+  <%= render "shared/errors", record: driver %>
 
   <div>
     <%= form.label :name, "Nome" %>

@@ -56,4 +56,40 @@ RSpec.describe "Registration::Trucks", type: :request do
       }.to change(Truck, :count).by(-1)
     end
   end
+
+  describe "GET /registration/trucks/lookup" do
+    it "redirects unauthenticated users" do
+      get lookup_registration_trucks_path, params: { plate: truck.plate }
+      expect(response).to redirect_to(new_user_session_path)
+    end
+
+    it "redirects users without the registration_operator/admin role" do
+      sign_in other_user
+      get lookup_registration_trucks_path, params: { plate: truck.plate }
+      expect(response).to redirect_to(root_path)
+    end
+
+    it "returns the truck's data when the plate matches" do
+      sign_in registration_user
+      get lookup_registration_trucks_path, params: { plate: truck.plate }
+
+      json = response.parsed_body
+      expect(json["found"]).to be true
+      expect(json["record"]).to eq("model" => truck.model, "capacity" => truck.capacity)
+    end
+
+    it "matches regardless of plate case/whitespace" do
+      sign_in registration_user
+      get lookup_registration_trucks_path, params: { plate: " #{truck.plate.downcase} " }
+
+      expect(response.parsed_body["found"]).to be true
+    end
+
+    it "returns not found when no truck matches" do
+      sign_in registration_user
+      get lookup_registration_trucks_path, params: { plate: "ZZZ0000" }
+
+      expect(response.parsed_body["found"]).to be false
+    end
+  end
 end

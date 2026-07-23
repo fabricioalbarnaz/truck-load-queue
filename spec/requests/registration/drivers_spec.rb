@@ -63,4 +63,45 @@ RSpec.describe "Registration::Drivers", type: :request do
       }.to change(Driver, :count).by(-1)
     end
   end
+
+  describe "GET /registration/drivers/lookup" do
+    it "redirects unauthenticated users" do
+      get lookup_registration_drivers_path, params: { cpf: driver.cpf }
+      expect(response).to redirect_to(new_user_session_path)
+    end
+
+    it "redirects users without the registration_operator/admin role" do
+      sign_in other_user
+      get lookup_registration_drivers_path, params: { cpf: driver.cpf }
+      expect(response).to redirect_to(root_path)
+    end
+
+    it "returns the driver's data when the cpf matches" do
+      sign_in registration_user
+      get lookup_registration_drivers_path, params: { cpf: driver.cpf }
+
+      json = response.parsed_body
+      expect(json["found"]).to be true
+      expect(json["record"]).to eq(
+        "name" => driver.name, "phone" => driver.phone, "notification_channel" => driver.notification_channel
+      )
+    end
+
+    it "matches regardless of cpf punctuation" do
+      sign_in registration_user
+      digits = driver.cpf
+      punctuated = "#{digits[0..2]}.#{digits[3..5]}.#{digits[6..8]}-#{digits[9..10]}"
+
+      get lookup_registration_drivers_path, params: { cpf: punctuated }
+
+      expect(response.parsed_body["found"]).to be true
+    end
+
+    it "returns not found when no driver matches" do
+      sign_in registration_user
+      get lookup_registration_drivers_path, params: { cpf: "00000000000" }
+
+      expect(response.parsed_body["found"]).to be false
+    end
+  end
 end

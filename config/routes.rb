@@ -7,8 +7,14 @@ Rails.application.routes.draw do
   mount_avo
 
   namespace :registration do
-    resources :drivers
-    resources :trucks
+    resources :drivers do
+      collection { get :lookup }
+    end
+
+    resources :trucks do
+      collection { get :lookup }
+    end
+
     resources :visits, only: %i[index create]
   end
 

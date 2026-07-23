@@ -7,6 +7,22 @@ module Registration
       @drivers = policy_scope(Driver).order(:name)
     end
 
+    def lookup
+      authorize Driver, :lookup?
+
+      cpf = params[:cpf]
+      driver = cpf.present? ? Driver.find_by(cpf: Driver.normalize_value_for(:cpf, cpf)) : nil
+
+      if driver
+        render json: {
+          found: true,
+          record: { name: driver.name, phone: driver.phone, notification_channel: driver.notification_channel }
+        }
+      else
+        render json: { found: false }
+      end
+    end
+
     def show
       authorize @driver
     end

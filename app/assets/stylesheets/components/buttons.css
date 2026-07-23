@@ -24,6 +24,11 @@ button:not(.btn-plain):hover {
   border-color: var(--color-primary-hover);
 }
 
+div.visit-sumbit {
+  margin-top: 10px;
+  margin-bottom: 0px !important;
+}
+
 /* Same specificity as the base `button:not(.btn-plain)` rule above
    (element + one class each), so source order decides and these win. */
 button.btn-secondary,

@@ -7,6 +7,19 @@ module Registration
       @trucks = policy_scope(Truck).order(:plate)
     end
 
+    def lookup
+      authorize Truck, :lookup?
+
+      plate = params[:plate]
+      truck = plate.present? ? Truck.find_by(plate: Truck.normalize_value_for(:plate, plate)) : nil
+
+      if truck
+        render json: { found: true, record: { model: truck.model, capacity: truck.capacity } }
+      else
+        render json: { found: false }
+      end
+    end
+
     def show
       authorize @truck
     end

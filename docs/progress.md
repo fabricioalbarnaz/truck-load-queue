@@ -1232,6 +1232,121 @@ running Puma instance, not a request spec) rather than manual `curl`, since Phas
 documented that raw `curl` POSTs against this app hit a CSRF-handshake quirk unrelated to app
 correctness — the system spec is the more reliable equivalent of a manual browser walkthrough.
 
+## Post-v1 — Events ingestion base infrastructure (done)
+
+Not one of the original 10 phases. Design doc: `docs/events-plan.md` (written before any code
+existed; can now be treated as historical context). The goal: let external devices — starting with
+a gate camera reading license plates — push events into the app, without hard-wiring any one
+device straight into domain logic. This phase built the generic pipeline only: a persisted `Event`
+record, a machine-authenticated JSON ingestion endpoint, an event-type registry, and async
+processing via a `truck_detected` **stub** handler that logs and returns. It does **not** create a
+`Visit` or call `Visits::CheckInService` — wiring a detected truck to an actual check-in is
+explicit future work, not done here.
+
+### What was created
+
+- **`db/migrate/20260810165701_create_events.rb`** + **`app/models/event.rb`**: `events` table —
+  `event_type` (string, required), `status` (string enum `pending`/`processed`/`failed`, default
+  `pending`), `device_id` (plain string, no FK — `Event` is infra, not a domain entity), `payload`
+  (`jsonb`, default `{}` — first JSONB column in this schema, since payload shape varies per
+  `event_type`), `received_at` (required, when this app accepted the request) kept distinct from
+  `occurred_at` (nullable, the device's own reported detection time) and `created_at`. Indexes on
+  `event_type`, `[event_type, status]`, `received_at`. `Event.for_type(event_type)` scope.
+- **`config/routes.rb`**: new `api` namespace (names the transport/audience — machine-facing JSON —
+  same convention as `registration`/`expedition`/`queue`/`public` naming a human actor/screen) →
+  `POST /api/events`.
+- **`app/controllers/api/base_controller.rb`**: `Api::BaseController < ActionController::API` (not
+  `ApplicationController` — sidesteps `allow_browser versions: :modern` and never has CSRF
+  protection to begin with). `authenticate_device!` before_action checks a shared-secret Bearer
+  token via `ActiveSupport::SecurityUtils.secure_compare` against `ENV["EVENTS_INGEST_TOKEN"]`,
+  read inline (matches the Twilio-adapter pattern, no `config.x` indirection).
+- **`app/controllers/api/events_controller.rb`**: `#create` delegates to
+  `Events::IngestEventService`, returns `202 { id, status }` on persisted, `422 { errors }`
+  otherwise. An unrecognized-but-present `event_type` still returns `202` — see accept-and-fail-
+  async decision below.
+- **`app/services/events/ingest_event_service.rb`**: same shape as `Visits::CheckInService` —
+  builds, saves, always returns the record; controller branches on `.persisted?`. Enqueues
+  `Events::ProcessEventJob` only on successful save. Parses `occurred_at` defensively (`nil` on a
+  bad string, doesn't raise).
+- **`app/services/events/registry.rb`**: `Events::Registry::PROCESSORS`, a frozen **String**-keyed
+  hash (event_type is untrusted external input, not an internal symbol literal) mapping
+  `"truck_detected"` → `Events::Processors::TruckDetectedProcessor`. Raises
+  `Events::UnknownEventTypeError` for anything unregistered.
+- **`app/jobs/events/process_event_job.rb`**: same shape as `SendNotificationJob` — `perform`
+  re-fetches by id, delegates to the registry-resolved processor,
+  `retry_on StandardError, wait: :polynomially_longer, attempts: 5`. Unknown-type errors mark the
+  event `failed` without re-raising (permanent, not worth retrying); any other `StandardError`
+  marks it `failed` **and** re-raises so the retry backoff still engages.
+- **`app/services/events/processors/truck_detected_processor.rb`**: `initialize(event:)` + `#call`,
+  logs and returns. No shared base class yet (matches the `Visits::*Service` plain-PORO
+  convention) — revisit once a second processor exists.
+- **`.env`** (local, gitignored): added `EVENTS_INGEST_TOKEN`. No `docker-compose.yml` change
+  needed (`web`/`worker` already load `.env` via `env_file:`).
+- **Tests** (21 new examples, all passing): `spec/models/event_spec.rb`,
+  `spec/requests/api/events_spec.rb` (401 no/wrong token; 202 + persisted `pending` event +
+  enqueued job for a recognized type; 422 + no row for blank `event_type`; 202 + persisted event
+  for an *unrecognized* type), `spec/services/events/ingest_event_service_spec.rb`,
+  `spec/services/events/registry_spec.rb`,
+  `spec/services/events/processors/truck_detected_processor_spec.rb` (explicit
+  `not_to change(Visit, :count)` regression guard against the stub silently growing into real
+  logic), `spec/jobs/events/process_event_job_spec.rb`, `spec/factories/events.rb`,
+  `spec/support/events.rb` (`ENV["EVENTS_INGEST_TOKEN"] ||= "test-token"`).
+
+### Deviations / gotchas discovered during execution
+
+- **`.env.example` has never actually been committed to git, despite being referenced as
+  "version-controlled" since Phase 1.** `.gitignore`'s `/.env*` pattern (added in the Phase 1
+  commit itself) matches `.env.example` too, not just the real `.env` — `git log --all --
+  .env.example` returns nothing, ever. The file exists on disk (and has since Phase 1/Phase 10, with
+  the Twilio + Production sections) purely as an untracked local artifact; every session that
+  "updated" it, including this phase's `EVENTS_INGEST_TOKEN` addition, was editing a file git was
+  never going to pick up. Not fixed here (`.gitignore` is out of scope for this feature) — flagged
+  for the user as a real, longstanding bug: either narrow the ignore pattern (e.g. `/.env` +
+  `/.env.*.local`) or explicitly `!/.env.example`, then force-add the file once so it's finally
+  tracked.
+- **`bin/*` scripts (`bin/rails`, `bin/docker-entrypoint`, etc.) had lost their executable bit** —
+  `git ls-files -s` showed them as mode `100644` instead of `100755`, unrelated to this feature,
+  pre-existing in the working tree. `docker compose up` failed with `exec: "./bin/rails": permission
+  denied` until `chmod +x bin/*` was run. Not yet committed — flagged for the user; the fix is a
+  one-line `git add --chmod=+x` away if they want it persisted.
+- **`config/master.key` on this machine didn't decrypt the committed `config/credentials.yml.enc`**
+  (`ActiveSupport::MessageEncryptor::InvalidMessage` on boot, in both `development` and `test`,
+  before any application code — including this phase's — ever loaded). Blocked running migrations
+  or specs at all. Per explicit user decision, regenerated both (`bin/rails credentials:edit` with a
+  fresh key) rather than trying to recover the old one. This **wiped the pre-existing
+  `active_record_encryption` block** that `Driver#cpf`/`Driver#phone` (`encrypts`, Phase 2) depend
+  on, which broke ~70 unrelated specs (`Missing Active Record encryption credential:
+  deterministic_key`) until `bin/rails db:encryption:init` was run and the generated
+  `primary_key`/`deterministic_key`/`key_derivation_salt` were added back into credentials. Net
+  effect: `config/credentials.yml.enc` is now encrypted under a **new** master key that only exists
+  on this machine — the user needs to redistribute the new `config/master.key` to any other
+  machine/CI that needs to decrypt it (old copies of `master.key` elsewhere will no longer work).
+- **Two pre-existing system specs are flaky independent of this work**
+  (`spec/system/avo_admin_spec.rb`, `spec/system/visit_lifecycle_spec.rb`) — different examples
+  fail on different runs (Devise sign-in via Capybara sometimes not landing, a Turbo-Streams-timing
+  `click_on` sometimes not finding its target), and neither touches anything this phase added
+  (`Event`, `Api::*`, `Events::*`). Full suite excluding those two: 202 examples total, only these
+  two ever fail, never any of the 21 new ones.
+
+### How to verify
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bin/rails db:prepare
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec spec/models/event_spec.rb \
+  spec/requests/api/events_spec.rb spec/services/events/ spec/jobs/events/   # 21 examples, 0 failures
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec              # 202 examples; only the
+                                                                              # 2 pre-existing flaky
+                                                                              # system specs above may fail
+docker compose run --rm web bin/rubocop                                     # clean except pre-existing offenses
+docker compose run --rm web bin/brakeman -q                                 # 0 warnings (1 unrelated EOL notice)
+```
+
+### Not done (explicitly deferred, per `docs/events-plan.md`)
+
+- Wiring `truck_detected` to actually call `Visits::CheckInService`/create a `Visit`.
+- Idempotency/duplicate-delivery handling (`external_id` column).
+- An Avo admin resource for browsing `Event` records.
+
 ## Project status
 
 All 10 phases from `docs/plan.md` are now complete. Remaining work is

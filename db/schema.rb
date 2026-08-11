@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_14_132552) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_10_165701) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -34,6 +34,22 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_132552) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["cpf"], name: "index_drivers_on_cpf", unique: true
+  end
+
+  create_table "events", force: :cascade do |t|
+    t.string "event_type", null: false
+    t.string "status", default: "pending", null: false
+    t.string "device_id"
+    t.jsonb "payload", default: {}, null: false
+    t.datetime "received_at", null: false
+    t.datetime "occurred_at"
+    t.datetime "processed_at"
+    t.text "error_message"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["event_type", "status"], name: "index_events_on_event_type_and_status"
+    t.index ["event_type"], name: "index_events_on_event_type"
+    t.index ["received_at"], name: "index_events_on_received_at"
   end
 
   create_table "roles", force: :cascade do |t|

@@ -68,6 +68,15 @@ volume instead of mounting the host directory. If running raw `docker run` comma
 `docker compose`, which is already set up correctly), use the Windows-style path
 (`-v "D:/Sites:/app"`) with `MSYS_NO_PATHCONV=1`.
 
+**Windows executable-bit note**: NTFS has no real Unix executable bit, so `bin/*` scripts
+(`bin/rails`, `bin/docker-entrypoint`, etc. — required executable for the Dockerfile's
+`ENTRYPOINT`/`CMD` to run at all) can silently lose their `755` mode on this platform. A plain
+`git add`/GUI "stage all" re-derives the mode from the filesystem (always `644` here) and reverts
+any fix. The only sequence that sticks: `git update-index --chmod=+x <files>` immediately followed
+by `git commit`, with nothing else touching those files in between. `git status`/`git diff` will
+keep showing the working-tree copy as `644` afterward (`MM` status) — that's cosmetic, since a
+commit captures the index (`755`), not the working tree; don't "fix" it by re-staging.
+
 ## Production
 
 No deploy tooling (Kamal, CI/CD) exists yet — this is manual `docker build`/`docker run`, per the
@@ -106,6 +115,19 @@ docker run -d \
 - Verified end-to-end (build, boot, migrate, seed, sign in, healthcheck) against real
   Postgres/Redis via `docker compose`'s `db`/`redis` services during Phase 10 — see
   `docs/progress.md` for the exact commands used.
+
+### Live test env (Railway)
+
+A free, throwaway test deployment exists on Railway (`adequate-analysis` project,
+`truck-load-queue` web service + `spirited-dream` worker service + `Postgres`/`Redis` plugins,
+branch `railway-deploy`) — `https://truck-load-queue-production.up.railway.app`. Verified
+end-to-end (sign-in, check-in, dispatch, queue, live public-screen updates via Action Cable). No
+code changes were needed beyond fixing the `bin/*` executable-bit bug below — `config/puma.rb`'s
+`ENV.fetch("PORT", 3000)` and Sidekiq's default Redis resolution both already picked up Railway's
+injected `PORT`/`REDIS_URL` with zero config. Full provisioning steps, env var tables, and the
+manual-redeploy workflow are in `docs/railway-deploy-plan.md`; this is a **Trial**-plan env (one-time
+$5 credit, no card, expected to stop running after roughly 1–3 weeks of uptime) — not a durable
+host, and real Twilio credentials were deliberately left unset (see that doc for the tradeoff).
 
 ## Architecture essentials
 

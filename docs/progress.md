@@ -1347,15 +1347,124 @@ docker compose run --rm web bin/brakeman -q                                 # 0 
 - Idempotency/duplicate-delivery handling (`external_id` column).
 - An Avo admin resource for browsing `Event` records.
 
+## Post-v1 — Railway test-env deployment (done)
+
+Not one of the original 10 phases. Design doc: `docs/railway-deploy-plan.md` (written before
+execution, then kept updated in place as a running Progress table/execution log — can be treated
+as historical context now, or consulted directly for the exact provisioning steps/env var tables).
+Goal: a free, publicly reachable test/staging deployment on Railway.app so the app can be
+demoed/verified without a local machine running — explicitly a throwaway test env, not a real
+production deploy (see "Project status" below for what real production still needs).
+
+Live result: `https://truck-load-queue-production.up.railway.app`, Railway project
+`adequate-analysis`, branch `railway-deploy`. Verified end-to-end manually: sign-in → check-in →
+issue order → finish loading → public `/public/queue` screen updating live in a second tab, all
+working against real Postgres/Redis plugins.
+
+### What was created/changed
+
+- **`bin/*` executable bits fixed** (`bin/rails`, `bin/rake`, `bin/setup`, `bin/dev`,
+  `bin/rubocop`, `bin/brakeman`, `bin/importmap`, `bin/docker-entrypoint`): committed as
+  `100644` (non-executable) since day one — the exact bug Phase 10's log already flagged locally
+  (worked around with an uncommitted `chmod +x` at the time) but never actually fixed at the
+  source. This was a genuine blocker: Railway (like any Docker host) builds straight from git's
+  stored file mode via the Dockerfile's `COPY . .`, so `ENTRYPOINT`/`CMD` would have hit
+  `permission denied` on the very first deploy. Fixed via `git update-index --chmod=+x <files>`
+  immediately followed by `git commit` — see the deviation below for why this exact sequence
+  matters and a plain `git add`/GUI stage doesn't work on this checkout.
+- **`docs/railway-deploy-plan.md`**: full design doc — blocking-bug writeup, provisioning steps,
+  env var tables (web vs. worker), seeding/verification checklists, a documented Twilio-adapter
+  limitation, cost/lifespan expectations, and a manual-redeploy workflow (dashboard or `railway
+  up`) for updating the env with new commits later.
+- **Railway project `adequate-analysis`**, provisioned via the dashboard (not config-as-code —
+  see the plan doc for why a repo-root `railway.toml` doesn't fit this app's two-services-one-repo
+  shape): `truck-load-queue` (web service, public domain, default Start Command so
+  `bin/docker-entrypoint`'s `db:prepare` still runs), `spirited-dream` (worker service,
+  auto-named by Railway, Start Command overridden to `bundle exec sidekiq`), plus `Postgres` and
+  `Redis` plugins (Public Networking left off both — nothing outside the project needs direct
+  access).
+- **Railway CLI installed locally** (`railwayapp/cli` v5.41.0) by downloading the Windows x86_64
+  release zip directly from GitHub (no Windows package manager had it — `winget search` returned
+  nothing relevant, no `npm`/`scoop` present in this environment) and extracting it to
+  `~/.railway/bin`, added to PATH. Used for `railway login`/`railway link`/`railway logs` to
+  authenticate and pull deploy logs directly rather than copy-pasting from the dashboard.
+
+### Deviations/gotchas discovered during execution
+
+- **This Windows checkout cannot persist a Unix executable bit through the working tree at all**,
+  and a background auto-checkpoint process on this machine made the failure mode worse. NTFS has
+  no real equivalent of the executable bit, so even after `git update-index --chmod=+x` stages a
+  `755` mode in the index, `git status`/`git diff` keep showing the working-tree copy as `644`
+  (cosmetic `MM` status, not itself a problem — `git commit` commits the index, not the working
+  tree). The **actual** failure mode: any subsequent plain `git add`/GUI "stage all" re-derives
+  the mode from the filesystem (always `644` here) and silently overwrites the staged `755` before
+  it's committed. This happened twice during this phase — once via an automatic `--wip-- [skip
+  ci]` checkpoint commit (root-caused via `git reflog`, which showed a repeating `reset: moving to
+  HEAD~1` + `commit: --wip--` pattern racing with manual git commands between tool calls), and
+  once via a manual "fix bin/ folder" commit that used a normal stage-all and flipped the mode
+  back to `644` again. **The only sequence that reliably sticks**: `git update-index --chmod=+x
+  <files>` immediately followed by `git commit`, with nothing else touching those files (no
+  editor save, no GUI stage, no auto-checkpoint) in between. Worth remembering for any future
+  file-mode change on this specific machine/checkout.
+- **Railway's "Custom Start Command" on a Dockerfile-deployed service overrides the image's
+  `ENTRYPOINT` entirely (exec form), not just `CMD`.** This is exactly what makes the
+  web/worker split work without any extra flag: leaving the web service's Start Command blank
+  keeps `bin/docker-entrypoint` (and its `db:prepare` conditional) intact, while setting the
+  worker's Start Command to `bundle exec sidekiq` bypasses `bin/docker-entrypoint` completely —
+  confirmed by its logs showing no migration output at all, which is expected, not a bug. Also
+  means the worker skips the entrypoint's jemalloc `LD_PRELOAD` line, which is performance-only
+  and irrelevant for a low-traffic test env.
+- **Zero application code changes were needed for Railway's dynamic `PORT`/service networking** —
+  confirmed directly from the live web log (`* Listening on http://0.0.0.0:8080`, not the
+  Dockerfile's `EXPOSE 3000`): `config/puma.rb`'s existing `port ENV.fetch("PORT", 3000)` already
+  picks up whatever Railway injects. Similarly, Sidekiq's default Redis connection resolution
+  already falls back to `ENV["REDIS_URL"]` with no `config/initializers/sidekiq.rb` needed —
+  confirmed via the worker log showing a clean connection to `redis.railway.internal` with no
+  errors, same `REDIS_URL` value as the web service's Action Cable connection.
+- **Known, deliberately-accepted limitation**: `TWILIO_*` env vars were left unset on both
+  services. `config/initializers/notifications.rb` picks the adapter purely off
+  `Rails.env.production?`, so this deploy always resolves to the real `TwilioSmsAdapter`/
+  `TwilioWhatsappAdapter`, never the safe `TestAdapter` — issuing an order still returns
+  normally (notification send is async via Sidekiq, decoupled from the request), but
+  `SendNotificationJob` fails when the worker picks it up, retries 5x with polynomial backoff,
+  then dies. Cosmetic worker-log noise only, doesn't block the verified UI workflow above; not
+  fixed here, see `docs/railway-deploy-plan.md` for the real-credentials option if notification
+  delivery itself ever needs testing.
+
+### How to verify
+
+```bash
+railway login && railway link -p adequate-analysis   # one-time, per machine
+railway logs --service truck-load-queue              # web: confirms clean boot, seeded roles/admin
+railway logs --service spirited-dream                # worker: confirms Sidekiq connected to Redis
+curl -s -o /dev/null -w "HTTP %{http_code}\n" https://truck-load-queue-production.up.railway.app/up
+```
+Manually verified end-to-end in a real browser against the live URL (not just logs/curl): sign-in
+as `admin@test.com`, check-in a driver+truck, issue an order, finish loading, and the public queue
+screen updating live in a second tab without a refresh — all five steps of
+`docs/railway-deploy-plan.md`'s verification checklist passed.
+
+### Not done (explicitly deferred, per `docs/railway-deploy-plan.md`)
+
+- Real Twilio credentials — notifications will keep failing harmlessly in worker logs until set.
+- This is a Railway **Trial** plan (one-time $5 credit, no card) — expect it to stop running
+  within roughly 1–3 weeks of continuous uptime depending on actual usage; not a durable env.
+
 ## Project status
 
 All 10 phases from `docs/plan.md` are now complete. Remaining work is
 listed in that file's "Future improvements" section (visit cancellation,
 `:order_issued`/`:getting_close` notifications, multi-site support, `en`
 locale) — none of it blocking, all explicitly out of v1 scope by design.
-A genuinely production deploy (as opposed to this phase's local
-Docker-network smoke test) would still need: a real Postgres/Redis host,
-`config.hosts` set to the real domain (currently unset/permissive — see
-the commented block in `config/environments/production.rb`), a real
-`RAILS_MASTER_KEY` provisioned outside version control, and real Twilio
-credentials.
+A genuinely production deploy would still need: a durable (non-trial)
+Postgres/Redis host, `config.hosts` set to the real domain (currently
+unset/permissive — see the commented block in `config/environments/production.rb`),
+a real `RAILS_MASTER_KEY` provisioned outside version control, and real
+Twilio credentials. The app has now been verified booting against real
+Postgres/Redis twice: once via a local Docker-network smoke test (Phase
+10) and once via a live public deploy on Railway's free trial tier (see
+"Post-v1 — Railway test-env deployment" above) — the latter is a
+throwaway test env on a time-limited free plan, not a durable production
+host, but it does prove the full stack (web + worker + Postgres + Redis +
+Action Cable) works correctly outside `docker compose` for the first
+time.

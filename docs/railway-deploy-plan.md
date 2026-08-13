@@ -1,11 +1,12 @@
 # Deploy a free Railway test env
 
-> Status: **planned, not yet implemented**. Written before any of it was executed — captures the
-> research and decisions behind standing up a free, publicly reachable test/staging deployment of
-> this app on Railway. Once implemented, fold the relevant parts into `CLAUDE.md`'s Production
-> section and log the work in `docs/progress.md`, per this repo's documentation convention (see
-> `docs/events-plan.md` for the same pattern). This file can be deleted or left as historical
-> context at that point.
+> Status: **implemented and verified end-to-end** (Steps 0–6 all done — see Progress table below).
+> Live test env: `https://truck-load-queue-production.up.railway.app` (Railway project
+> `adequate-analysis`). Written before any of it was executed, then updated in place as each step
+> landed — kept as the execution log for this work. Still to do: fold the relevant parts into
+> `CLAUDE.md`'s Production section and log the work in `docs/progress.md`, per this repo's
+> documentation convention (see `docs/events-plan.md` for the same pattern). This file can be
+> deleted or left as historical context once that's done.
 
 ## Progress
 
@@ -16,11 +17,11 @@ mid-way.
 | Step | Description | Status | Notes |
 |---|---|---|---|
 | 0 | Persist this plan to `docs/` | ✅ Done | `docs/railway-deploy-plan.md`, on `railway-deploy` branch |
-| 1 | Fix `bin/*` executable bits | 🟡 Staged, awaiting commit/PR | `git update-index --chmod=+x` run; verified all 8 scripts show `100755` via `git ls-files -s bin/`. Windows checkout will show `MM` in `git status` (cosmetic `core.fileMode` quirk, harmless — see PR notes) |
+| 1 | Fix `bin/*` executable bits | ✅ Done, pushed | Committed as `c656be5` on `railway-deploy`, pushed to origin. Note: a normal `git add`/GUI stage on this Windows checkout re-reads mode from disk (always `644`) and silently reverts this fix — only `git update-index --chmod=+x` immediately followed by a commit sticks. Hit this twice during execution (`9a763e3` accidentally reverted it) before landing correctly. |
 | 2 | Decide dashboard-only config (no `railway.toml`) | ✅ Decided (design-only step, nothing to commit) | documented above, no repo change needed |
-| 3 | Provision Railway project (Postgres, Redis, web, worker services) | ⬜ Not started | requires Step 1 merged/pushed first |
-| 4 | Confirm seeding worked | ⬜ Not started | depends on Step 3 |
-| 5 | Run end-to-end verification checklist | ⬜ Not started | depends on Step 3/4 |
+| 3 | Provision Railway project (Postgres, Redis, web, worker services) | ✅ Done | Project `adequate-analysis`; services `truck-load-queue` (web, public domain `truck-load-queue-production.up.railway.app`), `spirited-dream` (worker), `Postgres`, `Redis`, all Online. Web log confirms clean boot, no `bin/rails` permission error. Worker log confirms Sidekiq connected to `redis.railway.internal` with no errors. Railway CLI installed locally (`~/.railway/bin/railway.exe`, on PATH) and linked to this project for log access. |
+| 4 | Confirm seeding worked | ✅ Done | Web deploy log: `Seeded 4 roles and admin user (admin@test.com)`. `GET /up` → `HTTP 200`. |
+| 5 | Run end-to-end verification checklist | ✅ Done | User ran all 5 steps manually against `truck-load-queue-production.up.railway.app`: sign-in, check-in, issue order, finish loading, and the public `/public/queue` screen updating live in a second tab — all worked. Confirms `REDIS_URL` is correctly wired for both Sidekiq and Action Cable. |
 | 6 | Document manual redeploy workflow | ✅ Done (docs-only) | no execution needed until a first deploy exists to redeploy |
 
 ## Context

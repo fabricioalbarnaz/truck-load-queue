@@ -24,6 +24,30 @@ mid-way.
 | 5 | Run end-to-end verification checklist | ✅ Done | User ran all 5 steps manually against `truck-load-queue-production.up.railway.app`: sign-in, check-in, issue order, finish loading, and the public `/public/queue` screen updating live in a second tab — all worked. Confirms `REDIS_URL` is correctly wired for both Sidekiq and Action Cable. |
 | 6 | Document manual redeploy workflow | ✅ Done (docs-only) | no execution needed until a first deploy exists to redeploy |
 
+### Post-merge: the `bin/*` fix got lost a third time, and the deploy branch changed
+
+`railway-deploy`'s PR (#12) was **squash-merged** into `main` — its single-commit diff only
+included the docs changes, not the `bin/*` mode fix, even though the pushed branch tip genuinely
+had it correct (confirmed via `git diff`). Almost certainly the same Windows/NTFS issue biting
+again, this time via whatever tool performed the squash locally. Refixed directly on `main`
+(commit `ec8b8ae`). GitHub also auto-deleted `railway-deploy` after the merge, which broke
+Railway's auto-deploy trigger (both services were still watching that branch). Resolved by
+pushing a new `test` branch (from `main`, with the fix included) and repointing both Railway
+services' Settings → Source → Branch to `test` — confirmed redeployed cleanly from commit
+`ec8b8ae`, healthcheck `200`, no `permission denied`, Sidekiq connected to Redis with no errors.
+
+Also set `git config core.fileMode false` locally (this machine only, not committed) — git no
+longer compares the working tree's file mode against the index at all, which eliminates the
+permanent cosmetic `M` noise `bin/*` produced in `git status`/`git diff` on this Windows checkout.
+Side effect worth remembering: any *future* permission change on this machine still needs the
+explicit `git update-index --chmod=+x <file>` + immediate-commit sequence — git will no longer
+auto-detect a chmod from the filesystem at all, for any file, not just `bin/*`.
+
+**Current deploy source of truth: branch `test`**, not `railway-deploy` (deleted) or `main`
+(Railway isn't watching it). Keep this in mind for future updates — see Step 6 above for the
+redeploy workflow, applied to whichever branch Railway is actually configured to watch at the
+time.
+
 ## Context
 
 The user wants a live, publicly reachable test/staging deployment of this app (currently only ever

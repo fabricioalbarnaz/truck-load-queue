@@ -6,9 +6,9 @@
     <%= form.text_field :name %>
   </div>
 
-  <div>
+  <div data-controller="cpf-mask">
     <%= form.label :cpf, "CPF" %>
-    <%= form.text_field :cpf %>
+    <%= form.text_field :cpf, data: { action: "input->cpf-mask#format" } %>
   </div>
 
   <div>

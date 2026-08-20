@@ -11,9 +11,9 @@
          data-lookup-url-value="<%= lookup_registration_drivers_path %>"
          data-lookup-param-value="cpf">
       <%= form.fields_for :driver, @driver do |fd| %>
-        <div>
+        <div data-controller="cpf-mask">
           <%= fd.label :cpf, "CPF" %>
-          <%= fd.text_field :cpf, data: { lookup_target: "query", action: "blur->lookup#lookup" } %>
+          <%= fd.text_field :cpf, data: { lookup_target: "query", action: "input->cpf-mask#format blur->lookup#lookup" } %>
           <span class="spinner" data-lookup-target="spinner" hidden></span>
         </div>
 

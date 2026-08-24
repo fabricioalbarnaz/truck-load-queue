@@ -15,6 +15,7 @@ class Avo::Resources::Visit < Avo::BaseResource
     field :driver, as: :belongs_to
     field :truck, as: :belongs_to
     field :status, as: :text
+    field :order_number, as: :text
     field :entered_yard_at, as: :date_time
     field :order_issued_at, as: :date_time
     field :loading_started_at, as: :date_time

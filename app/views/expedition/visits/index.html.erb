@@ -17,7 +17,12 @@
         <td><%= visit.driver.name %></td>
         <td><%= visit.truck.plate %></td>
         <td><%= visit.entered_yard_at.strftime("%d/%m/%Y %H:%M") %></td>
-        <td><%= button_to "Emitir ordem", issue_order_expedition_visit_path(visit), method: :patch %></td>
+        <td>
+          <%= form_with url: issue_order_expedition_visit_path(visit), method: :patch, scope: :visit do |f| %>
+            <%= f.text_field :order_number, placeholder: "Número da ordem", required: true %>
+            <%= f.submit "Emitir ordem" %>
+          <% end %>
+        </td>
       </tr>
     <% end %>
   </tbody>
@@ -31,6 +36,7 @@
       <th>Posição</th>
       <th>Motorista</th>
       <th>Caminhão</th>
+      <th>Ordem</th>
       <th>Status</th>
     </tr>
   </thead>
@@ -40,6 +46,7 @@
         <td><%= visit.loading? ? "-" : visit.queue_position %></td>
         <td><%= visit.driver.name %></td>
         <td><%= visit.truck.plate %></td>
+        <td><%= visit.order_number %></td>
         <td><%= visit.loading? ? "Carregando" : "Na fila" %></td>
       </tr>
     <% end %>

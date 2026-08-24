@@ -10,6 +10,19 @@ RSpec.describe Visit, type: :model do
   it { is_expected.to belong_to(:finished_by).class_name("User").optional }
   it { is_expected.to validate_presence_of(:entered_yard_at) }
 
+  describe "order_number presence" do
+    it "is not required while in_yard" do
+      visit = build(:visit, order_number: nil)
+      expect(visit).to be_valid
+    end
+
+    it "is required once the visit leaves in_yard" do
+      visit = build(:visit, :queued, order_number: nil)
+      expect(visit).not_to be_valid
+      expect(visit.errors[:order_number]).to be_present
+    end
+  end
+
   it {
     is_expected.to define_enum_for(:status)
       .with_values(in_yard: "in_yard", queued: "queued", loading: "loading", finished: "finished")
@@ -80,7 +93,7 @@ RSpec.describe Visit, type: :model do
       expect(Turbo::StreamsChannel).to receive(:broadcast_replace_to)
         .with("public_queue", hash_including(target: "public_queue", partial: "public/queue/board"))
 
-      visit.update(status: :queued, order_issued_at: Time.current)
+      visit.update(status: :queued, order_number: "OC-123", order_issued_at: Time.current)
     end
 
     it "broadcasts when a visit finishes" do

@@ -8,6 +8,7 @@
       <tr>
         <th>Motorista</th>
         <th>Caminhão</th>
+        <th>Ordem</th>
         <th>Início do carregamento</th>
         <th></th>
       </tr>
@@ -16,6 +17,7 @@
       <tr>
         <td><%= @loading_visit.driver.name %></td>
         <td><%= @loading_visit.truck.plate %></td>
+        <td><%= @loading_visit.order_number %></td>
         <td><%= @loading_visit.loading_started_at.strftime("%d/%m/%Y %H:%M") %></td>
         <td><%= button_to "Finalizar carregamento", finish_queue_visit_path(@loading_visit), method: :patch %></td>
       </tr>
@@ -33,6 +35,7 @@
       <th>Posição</th>
       <th>Motorista</th>
       <th>Caminhão</th>
+      <th>Ordem</th>
     </tr>
   </thead>
   <tbody>
@@ -41,6 +44,7 @@
         <td><%= visit.queue_position %></td>
         <td><%= visit.driver.name %></td>
         <td><%= visit.truck.plate %></td>
+        <td><%= visit.order_number %></td>
       </tr>
     <% end %>
   </tbody>

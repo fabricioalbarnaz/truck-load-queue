@@ -121,6 +121,38 @@ RSpec.describe Visits::CheckInService do
       end
     end
 
+    context "with an order_number" do
+      it "issues the order immediately, sending the visit straight to loading when the queue is empty" do
+        visit = described_class.new(
+          driver: driver, truck: truck, checked_in_by: operator, order_number: "OC-123"
+        ).call
+
+        expect(visit).to be_persisted
+        expect(visit).to be_loading
+        expect(visit.order_number).to eq("OC-123")
+        expect(visit.order_issued_by).to eq(operator)
+      end
+
+      it "queues the visit when another one is already loading" do
+        create(:visit, :loading)
+
+        visit = described_class.new(
+          driver: driver, truck: truck, checked_in_by: operator, order_number: "OC-123"
+        ).call
+
+        expect(visit).to be_queued
+      end
+    end
+
+    context "without an order_number" do
+      it "leaves the visit in_yard" do
+        visit = described_class.new(driver: driver, truck: truck, checked_in_by: operator).call
+
+        expect(visit).to be_in_yard
+        expect(visit.order_number).to be_nil
+      end
+    end
+
     context "with both a new driver and a new truck" do
       it "persists both and creates the visit" do
         new_driver = build(:driver)

@@ -1450,6 +1450,76 @@ screen updating live in a second tab without a refresh — all five steps of
 - This is a Railway **Trial** plan (one-time $5 credit, no card) — expect it to stop running
   within roughly 1–3 weeks of continuous uptime depending on actual usage; not a durable env.
 
+## Post-v1 — Order number on visits (done)
+
+Not one of the original 10 phases — a workflow change requested after v1 shipped. Previously
+"issuing an order" (`Visits::IssueOrderService`) only stamped a timestamp (`order_issued_at`) used
+purely as the FIFO sort key; there was no human-facing order number anywhere. Now a truck cannot
+enter the queue without one: the expedition operator must type an order number when issuing an
+order from `/expedition`, and the registration operator may optionally supply one at check-in
+time, in which case the truck skips the yard list entirely and goes straight into the queue (or
+straight to `loading`, if the queue is empty) — same underlying service, reused.
+
+### What was created / changed
+
+- **Migration** `db/migrate/20260824120000_add_order_number_to_visits.rb`: adds a nullable
+  `order_number:string` column to `visits` (nullable because `in_yard` visits don't have one yet).
+- **`Visit` model** (`app/models/visit.rb`): `validates :order_number, presence: true, unless:
+  :in_yard?` — this is what makes "no order number → can't be in the queue" an enforced DB-level
+  invariant rather than just a UI convention. No uniqueness constraint (deliberate — order numbers
+  can repeat across visits, confirmed with the user).
+- **`Visits::IssueOrderService`**: `order_number:` is now a required keyword arg, included in the
+  `attributes` hash passed to `@visit.update`. Presence is enforced by the model validation above,
+  so a blank order number fails the update exactly like any other invalid issuance already did
+  (`result.errors.empty?` stays the failure signal callers check).
+- **`Visits::CheckInService`**: gained an optional `order_number: nil` kwarg. After the visit save
+  succeeds inside the existing transaction, if an order number was given it calls
+  `Visits::IssueOrderService` on the just-created visit (`order_issued_by: @checked_in_by` — same
+  operator performs both steps in one action) and rolls back the whole check-in if that somehow
+  fails, rather than leaving an inconsistent record.
+- **`Expedition::VisitsController#issue_order`**: reads `params[:visit][:order_number]` and passes
+  it through; on failure the flash now surfaces the actual validation message
+  (`result.errors.full_messages.to_sentence`) instead of a fully generic string.
+- **`Registration::VisitsController`**: `visit_params` now permits a top-level `:order_number`
+  alongside the existing nested `driver:`/`truck:` params.
+- **Views**: `expedition/visits/index.html.erb`'s yard-row action changed from a bare `button_to`
+  (no inputs) to a small per-row `form_with ..., scope: :visit` with a required `order_number` text
+  field; its "Fila" table and `queue_screen/visits/index.html.erb`'s tables gained an "Ordem"
+  column for operator visibility. `registration/visits/index.html.erb` gained an optional
+  top-level `order_number` field on the existing check-in form, with a hint that filling it sends
+  the truck straight into the queue.
+- **Avo**: `app/avo/resources/visit.rb` gained `field :order_number, as: :text`.
+- Specs updated/added throughout: `spec/factories/visits.rb`'s `:queued`/`:loading`/`:finished`
+  traits now set `order_number` (required by the new validation); presence-validation cases in
+  `spec/models/visit_spec.rb`; required-kwarg + blank-order-number-fails cases in
+  `spec/services/visits/issue_order_service_spec.rb`; order-number-present/absent cases in
+  `spec/services/visits/check_in_service_spec.rb`; request-spec updates in
+  `spec/requests/expedition/visits_spec.rb` (params now include `visit: { order_number: }`, plus a
+  missing-order-number-rejected case) and `spec/requests/registration/visits_spec.rb` (a
+  straight-to-queue case); `spec/system/visit_lifecycle_spec.rb` fills in the new
+  `visit_order_number` field before clicking "Emitir ordem".
+
+### Deviations / gotchas discovered during execution
+
+- None beyond the usual — this was a straightforward additive column + validation. One nuance
+  worth remembering for next time a validation is added: after a failed `ActiveRecord#update`, the
+  in-memory object still reflects the *attempted* (unsaved) attribute values (`assign_attributes`
+  runs before validation), so a spec asserting "the visit stayed `in_yard`" after a rejected
+  issuance must `visit.reload` first — asserting on the same in-memory object would see the
+  attempted `status: "queued"` instead of the actual, unpersisted DB state.
+
+### How to verify
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bin/rails db:prepare
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 210 examples, 0 failures
+                                                                   # (1 unrelated pre-existing flake
+                                                                   # in spec/system/avo_admin_spec.rb,
+                                                                   # confirmed present on unmodified main)
+docker compose run --rm web bin/rubocop                          # clean except pre-existing offenses
+docker compose run --rm web bin/brakeman -q                      # 0 warnings
+```
+
 ## Project status
 
 All 10 phases from `docs/plan.md` are now complete. Remaining work is

@@ -25,6 +25,7 @@ RSpec.describe "Visit lifecycle with live public queue updates", type: :system d
 
     sign_in_via_form(expedition_user)
     visit expedition_visits_path
+    fill_in "visit_order_number", with: "OC-123"
     click_on "Emitir ordem"
     expect(page).to have_content("Ordem de carregamento emitida")
 

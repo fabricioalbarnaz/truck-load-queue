@@ -10,13 +10,22 @@ module Expedition
       authorize Visit, :issue_order?
 
       visit = Visit.in_yard.find(params[:id])
-      result = Visits::IssueOrderService.new(visit: visit, order_issued_by: current_user).call
+      result = Visits::IssueOrderService.new(
+        visit: visit, order_issued_by: current_user, order_number: order_number_param
+      ).call
 
       if result.errors.empty?
         redirect_to expedition_visits_path, notice: "Ordem de carregamento emitida."
       else
-        redirect_to expedition_visits_path, alert: "Não foi possível emitir a ordem de carregamento."
+        alert = result.errors.full_messages.to_sentence.presence || "Não foi possível emitir a ordem de carregamento."
+        redirect_to expedition_visits_path, alert: alert
       end
+    end
+
+    private
+
+    def order_number_param
+      params.require(:visit).permit(:order_number)[:order_number]
     end
   end
 end

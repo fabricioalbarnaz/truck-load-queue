@@ -11,6 +11,7 @@ class Visit < ApplicationRecord
   enum :status, { in_yard: "in_yard", queued: "queued", loading: "loading", finished: "finished" }, default: "in_yard"
 
   validates :entered_yard_at, presence: true
+  validates :order_number, presence: true, unless: :in_yard?
   validate :driver_has_no_other_active_visit
   validate :truck_has_no_other_active_visit
 

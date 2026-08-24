@@ -28,10 +28,11 @@ RSpec.describe "Expedition::Visits", type: :request do
       visit = create(:visit)
       sign_in expedition_user
 
-      patch issue_order_expedition_visit_path(visit)
+      patch issue_order_expedition_visit_path(visit), params: { visit: { order_number: "OC-123" } }
 
       expect(response).to redirect_to(expedition_visits_path)
       expect(visit.reload).to be_loading
+      expect(visit.order_number).to eq("OC-123")
       expect(visit.order_issued_by).to eq(expedition_user)
     end
 
@@ -40,16 +41,26 @@ RSpec.describe "Expedition::Visits", type: :request do
       visit = create(:visit)
       sign_in expedition_user
 
-      patch issue_order_expedition_visit_path(visit)
+      patch issue_order_expedition_visit_path(visit), params: { visit: { order_number: "OC-123" } }
 
       expect(visit.reload).to be_queued
+    end
+
+    it "does not issue the order when no order number is given" do
+      visit = create(:visit)
+      sign_in expedition_user
+
+      patch issue_order_expedition_visit_path(visit), params: { visit: { order_number: "" } }
+
+      expect(response).to redirect_to(expedition_visits_path)
+      expect(visit.reload).to be_in_yard
     end
 
     it "redirects users without the expedition_operator/admin role without issuing the order" do
       visit = create(:visit)
       sign_in other_user
 
-      patch issue_order_expedition_visit_path(visit)
+      patch issue_order_expedition_visit_path(visit), params: { visit: { order_number: "OC-123" } }
 
       expect(response).to redirect_to(root_path)
       expect(visit.reload).to be_in_yard

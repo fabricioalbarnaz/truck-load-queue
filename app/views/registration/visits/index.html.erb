@@ -63,6 +63,12 @@
     </div>
   </fieldset>
 
+  <div>
+    <%= form.label :order_number, "Número da ordem (opcional)" %>
+    <%= form.text_field :order_number %>
+    <p class="hint">Se informado, o caminhão já entra direto na fila de carregamento.</p>
+  </div>
+
   <div class="button_to visit-sumbit">
     <%= form.submit "Registrar check-in" %>
   </div>

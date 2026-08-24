@@ -14,7 +14,9 @@ module Registration
       @driver = find_or_initialize_driver(visit_params.fetch(:driver, {}))
       @truck = find_or_initialize_truck(visit_params.fetch(:truck, {}))
 
-      @visit = Visits::CheckInService.new(driver: @driver, truck: @truck, checked_in_by: current_user).call
+      @visit = Visits::CheckInService.new(
+        driver: @driver, truck: @truck, checked_in_by: current_user, order_number: visit_params[:order_number]
+      ).call
 
       if @visit.persisted?
         redirect_to registration_visits_path, notice: "Check-in registrado com sucesso."
@@ -46,6 +48,7 @@ module Registration
 
     def visit_params
       params.require(:visit).permit(
+        :order_number,
         driver: %i[cpf name phone notification_channel],
         truck: %i[plate model capacity]
       )

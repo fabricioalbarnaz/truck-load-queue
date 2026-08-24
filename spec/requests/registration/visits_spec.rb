@@ -45,6 +45,18 @@ RSpec.describe "Registration::Visits", type: :request do
       expect(Visit.last).to be_in_yard
     end
 
+    it "sends the visit straight into the queue when an order_number is given" do
+      sign_in registration_user
+
+      post registration_visits_path,
+        params: { visit: { driver: new_driver_params, truck: new_truck_params, order_number: "OC-123" } }
+
+      expect(response).to redirect_to(registration_visits_path)
+      expect(Visit.last).to be_loading
+      expect(Visit.last.order_number).to eq("OC-123")
+      expect(Visit.last.order_issued_by).to eq(registration_user)
+    end
+
     it "redirects users without the registration_operator/admin role without checking in" do
       sign_in other_user
       expect {

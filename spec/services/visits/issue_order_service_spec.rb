@@ -9,7 +9,7 @@ RSpec.describe Visits::IssueOrderService do
 
       result = nil
       expect {
-        result = described_class.new(visit: visit, order_issued_by: operator).call
+        result = described_class.new(visit: visit, order_issued_by: operator, order_number: "OC-123").call
       }.to have_enqueued_job(SendNotificationJob).with(visit_id: visit.id, event: "your_turn")
 
       expect(result).to be_loading
@@ -24,7 +24,7 @@ RSpec.describe Visits::IssueOrderService do
 
       result = nil
       expect {
-        result = described_class.new(visit: visit, order_issued_by: operator).call
+        result = described_class.new(visit: visit, order_issued_by: operator, order_number: "OC-123").call
       }.not_to have_enqueued_job(SendNotificationJob)
 
       expect(result).to be_queued
@@ -35,9 +35,18 @@ RSpec.describe Visits::IssueOrderService do
       create(:visit, :queued)
       visit = create(:visit)
 
-      result = described_class.new(visit: visit, order_issued_by: operator).call
+      result = described_class.new(visit: visit, order_issued_by: operator, order_number: "OC-123").call
 
       expect(result).to be_queued
+    end
+
+    it "fails and leaves the visit in_yard when the order number is blank" do
+      visit = create(:visit)
+
+      result = described_class.new(visit: visit, order_issued_by: operator, order_number: "").call
+
+      expect(result.errors[:order_number]).to be_present
+      expect(visit.reload).to be_in_yard
     end
   end
 end

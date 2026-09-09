@@ -6,7 +6,7 @@ module SystemHelpers
   def sign_in_via_form(user, password: "password123")
     # Literal "/" rather than the `root_path` helper — it resolves to Avo's
     # engine-internal root instead of the app's root in some contexts (see
-    # docs/progress.md's Phase 8 deviations for the same issue in request specs).
+    # docs/software-evolution.md's Phase 8 section for the same issue in request specs).
     visit "/"
     if page.has_button?("Sair")
       click_on "Sair"

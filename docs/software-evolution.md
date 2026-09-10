@@ -629,7 +629,7 @@ container connected to Redis and booted Sidekiq cleanly without re-running `db:p
 
 ## Post-v1 changes
 
-Four rounds of work happened after all 10 phases shipped. Design docs for two of them
+Six rounds of work happened after all 10 phases shipped. Design docs for two of them
 (`docs/events-plan.md`, `docs/railway-deploy-plan.md`) were written before execution and kept
 updated in place as execution logs — they're retained as source material alongside this file.
 
@@ -836,11 +836,142 @@ testing conventions, commands, production/deploy); this file remains the only hi
 comments (`app/avo/resources/user.rb`, `spec/support/system_helpers.rb`) pointing at
 `docs/progress.md` were repointed at this file's phase sections.
 
+### Live plate autofill on check-in from `truck_detected` events
+
+A gate camera (HikCentral) sends `truck_detected` events with a plate to the events pipeline built
+in the "Events ingestion base infrastructure" round above. That round's `TruckDetectedProcessor` was
+a deliberate no-op stub; this round gives it a first real effect — pushing the detected plate live
+onto the yard check-in screen — while still stopping short of creating a `Visit`, which remains
+explicit future work.
+
+The check-in screen (`registration/visits#index`) turned out to already be a single page (form +
+yard list together, no separate "list" vs. "add form" screens), so the two scenarios originally
+described collapsed into one implementation: whenever an operator has the page open, the plate field
+is live-filled via Turbo Streams. Confirmed with the user: keep the single combined page (no new
+screens/routes); auto-trigger the existing blur-lookup after filling the plate, so truck
+model/capacity populate immediately if that truck is already registered; always overwrite whatever
+is currently in the field, since the detection event is ground truth for who's at the gate right now.
+
+**What changed**: `TruckDetectedProcessor#call` now normalizes `event.payload["plate"]` via
+`Truck.normalize_value_for(:plate, ...)` and, if present, calls
+`Turbo::StreamsChannel.broadcast_replace_to("registration_checkin", target: "truck_plate_field", ...)`
+— the same broadcast primitive the public queue screen already uses, just from a job instead of a
+model callback; a blank/missing plate just logs and no-ops rather than failing the event. The plate
+label/input/spinner group was extracted out of the check-in form into
+`app/views/registration/visits/_truck_plate_field.html.erb` (wrapped in `<div id="truck_plate_field">`)
+so the exact same partial renders both the normal form field and the broadcast target — it uses
+plain `label_tag`/`text_field_tag` rather than the `fields_for` builder so it can render outside the
+form context, reproducing the same field name/id (`visit[truck][plate]` / `visit_truck_plate`) Rails'
+`fields_for :truck` would generate. `index.html.erb` gained a `turbo_stream_from "registration_checkin"`
+subscription, mirroring the public queue's `turbo_stream_from "public_queue"`.
+
+To auto-trigger the existing lookup without disturbing normal page loads, `lookup_controller.js`
+gained a `queryTargetConnected(target)` Stimulus lifecycle callback — it fires whenever a
+`query`-target element is (re)inserted into the controller's scope, including via a Turbo Stream
+replace, and calls `this.lookup()` only when that element carries `data-lookup-autofill="true"`. That
+flag is set to `true` only on the broadcast-rendered partial (`autofill: true` local) and `false` on
+the normal page render, so a fresh page load never fires a spurious lookup.
+
+**Gotcha discovered during manual verification, then fixed**: `config/cable.yml`'s dev `async`
+adapter only shares broadcasts within a single OS process, but `Events::ProcessEventJob` runs in the
+separate `worker` Sidekiq container while the browser's Action Cable connection is served by `web` —
+so a broadcast issued during a real `docker compose up` session never reached the browser, even
+though the worker logs showed the job completing with no errors. Confirmed this wasn't a code defect
+by temporarily pointing dev's cable adapter at the already-running Redis service, which made
+cross-process delivery work correctly end-to-end (live fill, auto-lookup, and always-overwrite all
+verified manually). Since Redis is already a dev dependency (used by Sidekiq), that temporary swap
+was then made permanent: `config/cable.yml`'s `development` block now uses `adapter: redis` (same
+`REDIS_URL`-driven URL as `production`, and `docker-compose.yml` already sets
+`REDIS_URL=redis://redis:6379/0` for both `web` and `worker`) instead of `async`. Re-verified after
+the permanent switch with no workaround needed. `test`'s cable adapter is untouched (still `async`)
+— system specs never hit this gap because `perform_enqueued_jobs` runs jobs inline, in the same
+process as the test's Capybara-driven server.
+
+**Not done (explicitly deferred, same boundary as the events-ingestion round)**: still does not
+create a `Visit` or call `Visits::CheckInService` — wiring a detected truck to an actual check-in
+stays separate future work.
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 213 examples, 0 failures
+docker compose run --rm web bin/rubocop                          # clean except pre-existing offenses
+                                                                   # (config/initializers/devise.rb,
+                                                                   # an old migration — unrelated)
+```
+
+### HikCentral ANPR event ingestion, filtered to real plate detections
+
+The previous round's `/api/events` contract was a placeholder shape, since the real vendor payload
+wasn't known yet. The user supplied HikCentral's actual webhook payload and the vendor's OpenAPI
+guide (`docs/HikCentral Professional OpenAPI V3.1.1_Developer Guide...pdf`, confirmed via
+`pdftotext` search: p.859 lists `eventType` `131622` as "License Plate Information Uploading",
+p.813-816 documents the `OnEventNotify` envelope and ANPR `data` fields) — HikCentral pushes
+`{method: "OnEventNotify", params: {sendTime, ability, events: [...]}, isHistory, event}`, where
+each `events[]` entry has `eventType` (numeric — other codes exist for door/access/face/GPS events),
+`srcIndex`/`srcType`/`srcName`, `happenTime`, `status`, and a `data` object whose `plateNo` is either
+the detected plate or the literal string `"Unknown"` when the camera detects a vehicle but can't
+read its plate.
+
+Since more vendor integrations are expected later, this shape got its own ingestion path rather than
+reshaping the generic contract: a new `POST /api/hikcentral/events` route, confirmed with the user
+over folding vendor-detection logic into the existing generic endpoint. **What was created**:
+`Api::Hikcentral::EventsController` (`< Api::BaseController`, reusing the existing Bearer-token
+check unchanged) and `Events::Adapters::HikcentralAdapter` — the only place that knows HikCentral's
+shape. The adapter reads `params.events[]`, drops (no `Event` row at all) any sub-event where
+`eventType != 131622` **or** `data.plateNo == "Unknown"` (confirmed with the user as an OR — either
+condition alone is enough to skip; skipped sub-events are pure noise from a live camera feed, not
+worth an audit trail), and for each surviving sub-event calls the **existing, unmodified**
+`Events::IngestEventService` with `event_type: "truck_detected"`, `device_id: srcIndex`,
+`occurred_at: happenTime`, `payload: {"plate" => plateNo}`. This is the key design point: from
+`Events::Registry`'s, `Events::ProcessEventJob`'s, and `TruckDetectedProcessor`'s point of view
+(including the check-in live-autofill feature built on top of it in the previous round), a
+HikCentral-originated event looks exactly like today's generic `truck_detected` event — none of
+that pipeline needed to change. The generic `POST /api/events` endpoint and contract are untouched,
+staying available as the landing contract any future vendor adapter (`/api/<vendor>/events`) can
+feed into the same way.
+
+**Gotcha caught by the request spec**: the adapter's first cut compared `eventType` with strict
+Integer `==`, which passed when tested with real JSON but silently failed when a request spec posted
+plain form-encoded params (Rails stringifies nested values, turning `131622` into `"131622"`) — every
+event was wrongly skipped. Fixed with `.to_i` on the comparison for robustness, and the request spec
+now sends `as: :json` to accurately match HikCentral's real `Content-Type: application/json` posts
+rather than exercising a form-encoded path production traffic never takes.
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 224 examples, 0 failures
+docker compose run --rm web bin/rubocop                          # clean except pre-existing offenses
+```
+
+Manually verified via `docker compose up`: POSTing the real example payload (`131622`, plate
+`EZL3101`) → `202`, one `Event` created; POSTing a push containing a non-`131622` event and a
+`131622`/`"Unknown"`-plate event → `202`, `skipped: 2`, `Event.count` unchanged; POSTing a
+`131622`/registered-plate event while the check-in screen was open → Placa/Modelo/Capacidade filled
+in live, same as the existing generic-endpoint path. `docs/example_payload_hikcentral.txt` (the raw
+example payload the user supplied) was deleted once the adapter spec had its own inlined fixture
+covering the same shape.
+
+**Follow-up fix — auth header**: HikCentral's real event-push mechanism doesn't send the shared
+secret via `Authorization: Bearer` (it doesn't support configuring that scheme) — it sends a plain
+`Token` header instead. `Api::BaseController#authenticate_device!`'s inline
+`Authorization`-header read was extracted into a `provided_token` method, which
+`Api::Hikcentral::EventsController` overrides to read `request.headers["HTTP_TOKEN"]` — the generic
+`/api/events` endpoint is untouched and still uses `Authorization: Bearer`.
+
+**Gotcha while pinning down the exact header key**: Rack prefixes *every* incoming wire header with
+`HTTP_` (uppercased, dashes to underscores) when building the request env — a wire header literally
+named `Token` becomes env/`request.headers` key `HTTP_TOKEN`, but a wire header literally named
+`HTTP_TOKEN` (as raw wire text) becomes the *double*-prefixed `HTTP_HTTP_TOKEN`. This was confirmed
+empirically (temporary logging + `curl` against the running dev server) after an initial mix-up
+where "the header name is HTTP_TOKEN" was first read as the literal wire text rather than as Rack's
+already-prefixed env-key form — the user's own `request.headers.each` inspection of a real request
+(showing key `"HTTP_TOKEN"`) confirmed the real device sends a wire header named `Token`, matching
+the code as implemented. Verified with `curl -H "Token: <token>"` → `202`; missing/wrong `Token` →
+`401`; `/api/events` with `Authorization: Bearer` unaffected.
+
 ---
 
 ## Project status
 
-All 10 originally planned phases are complete, plus the four post-v1 rounds above. Remaining work
+All 10 originally planned phases are complete, plus the six post-v1 rounds above. Remaining work
 is listed in `CLAUDE.md`'s "Product scope" section (visit cancellation,
 `:order_issued`/`:getting_close` notifications, multi-site support, `en` locale) — none of it
 blocking, all explicitly out of v1 scope by design.

@@ -1,6 +1,7 @@
 module Api
   class EventsController < BaseController
     def create
+      Rails.logger.info(params.to_unsafe_h)
       event = Events::IngestEventService.new(
         event_type: params[:event_type],
         device_id: params[:device_id],

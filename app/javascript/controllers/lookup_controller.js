@@ -9,6 +9,16 @@ export default class extends Controller {
   static targets = ["query", "fillable", "spinner"]
   static values = { url: String, param: String }
 
+  // Fires whenever a query-target element is (re)inserted into this controller's
+  // scope, including via a Turbo Stream replace (e.g. a plate pushed in live from
+  // a gate-camera detection). Only auto-runs the lookup when the element is flagged
+  // for it, so a normal page load/render doesn't trigger a spurious lookup.
+  queryTargetConnected(target) {
+    if (target.dataset.lookupAutofill === "true") {
+      this.lookup()
+    }
+  }
+
   async lookup() {
     const query = this.queryTarget.value.trim()
     if (!query) return

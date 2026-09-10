@@ -7,9 +7,13 @@ module Api
     def authenticate_device!
       head :unauthorized and return if expected_token.blank?
 
-      token = request.headers["Authorization"].to_s.delete_prefix("Bearer ").strip
+      token = provided_token
       head :unauthorized and return if token.blank?
       head :unauthorized unless ActiveSupport::SecurityUtils.secure_compare(token, expected_token)
+    end
+
+    def provided_token
+      request.headers["Authorization"].to_s.delete_prefix("Bearer ").strip
     end
 
     def expected_token

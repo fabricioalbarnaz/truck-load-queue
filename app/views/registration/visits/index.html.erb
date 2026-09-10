@@ -1,5 +1,7 @@
 <h1>Check-in no pátio</h1>
 
+<%= turbo_stream_from "registration_checkin" %>
+
 <%= form_with model: @visit, url: registration_visits_path do |form| %>
   <%= render "shared/errors", record: @visit, action_label: "check-in" %>
 
@@ -44,11 +46,7 @@
          data-lookup-url-value="<%= lookup_registration_trucks_path %>"
          data-lookup-param-value="plate">
       <%= form.fields_for :truck, @truck do |ft| %>
-        <div>
-          <%= ft.label :plate, "Placa" %>
-          <%= ft.text_field :plate, data: { lookup_target: "query", action: "blur->lookup#lookup" } %>
-          <span class="spinner" data-lookup-target="spinner" hidden></span>
-        </div>
+        <%= render "truck_plate_field", plate: @truck.plate, autofill: false %>
 
         <div>
           <%= ft.label :model, "Modelo" %>

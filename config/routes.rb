@@ -40,6 +40,10 @@ Rails.application.routes.draw do
 
   namespace :api do
     resources :events, only: %i[create]
+
+    namespace :hikcentral do
+      resources :events, only: %i[create]
+    end
   end
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.

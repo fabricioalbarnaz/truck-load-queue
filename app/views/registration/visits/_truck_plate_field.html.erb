@@ -1,0 +1,6 @@
+<div id="truck_plate_field">
+  <%= label_tag "visit_truck_plate", "Placa" %>
+  <%= text_field_tag "visit[truck][plate]", plate, id: "visit_truck_plate",
+        data: { lookup_target: "query", lookup_autofill: autofill, action: "blur->lookup#lookup" } %>
+  <span class="spinner" data-lookup-target="spinner" hidden></span>
+</div>

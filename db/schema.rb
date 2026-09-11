@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_24_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_09_11_141720) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -50,6 +50,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_24_120000) do
     t.index ["event_type", "status"], name: "index_events_on_event_type_and_status"
     t.index ["event_type"], name: "index_events_on_event_type"
     t.index ["received_at"], name: "index_events_on_received_at"
+  end
+
+  create_table "feature_flags", force: :cascade do |t|
+    t.string "key", null: false
+    t.boolean "enabled", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["key"], name: "index_feature_flags_on_key", unique: true
   end
 
   create_table "roles", force: :cascade do |t|

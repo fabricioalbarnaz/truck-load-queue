@@ -269,6 +269,14 @@ rather than adding a card, unless told otherwise at that point.
   (`app/models/notifications/`) — a `TestAdapter` in dev/test so no real SMS/WhatsApp is ever sent
   accidentally outside production; real `TwilioSmsAdapter`/`TwilioWhatsappAdapter` in production.
   Triggered from `Visits::IssueOrderService`/`Visits::PromoteNextService`, not a model callback.
+- **Feature flags**: `FeatureFlag` (`app/models/feature_flag.rb`) is a DB-backed on/off switch for
+  behavior that only some client deployments want (first case: HikCentral ANPR sync — see the
+  Events ingestion section below). `FeatureFlag::KEYS` is the whitelist of valid keys (same
+  pattern as `Role::KEYS`); `FeatureFlag.enabled?(:key)` raises `ArgumentError` on an unregistered
+  key rather than silently returning false. Deliberately **no seeding and no Avo/admin UI** — an
+  absent row means disabled by default, and toggling is done only via `bin/rails console`
+  (`FeatureFlag.enable!`/`.disable!`) so an admin can't misclick it and ops can flip it instantly
+  during an incident with no redeploy.
 - **Queue position is derived, not stored** — computed from `order_issued_at` ordering to avoid
   desync bugs (`Visit#queue_position` / `Visit.active_queue` in `app/models/visit.rb`).
 - Two Dockerfiles: `Dockerfile` (production, multi-stage, non-root, Rails-generated) vs.

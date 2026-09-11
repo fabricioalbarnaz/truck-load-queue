@@ -967,11 +967,47 @@ already-prefixed env-key form — the user's own `request.headers.each` inspecti
 the code as implemented. Verified with `curl -H "Token: <token>"` → `202`; missing/wrong `Token` →
 `401`; `/api/events` with `Authorization: Bearer` unaffected.
 
+### Feature flags structure
+
+Different client deployments will need different behaviors — the concrete driver: after a truck is
+registered, the app should call the HikCentral API to add the plate to an access list, but only for
+clients that actually have HikCentral/Hikvision hardware. Since each client is its own single-yard
+deployment (not multi-tenancy), this only needed a small number of per-install capability switches,
+not a full flagging platform.
+
+**What was created**: `FeatureFlag` (`app/models/feature_flag.rb`), backed by a new `feature_flags`
+table (`key` unique string, `enabled` boolean defaulting `false`). `FeatureFlag::KEYS` is the
+whitelist of valid keys (`%w[hikcentral]` so far), following the same fixed-reference-data pattern
+as `Role::KEYS`. `FeatureFlag.enabled?(:key)` raises `ArgumentError` on a key not in `KEYS` — a
+typo at a call site or in a console session is caught immediately rather than the integration
+silently never firing. `FeatureFlag.enable!(:key)`/`.disable!(:key)` find-or-initialize a row and
+persist it.
+
+**Deliberately excluded, after discussion with the user**: no seed data (a valid key with no row
+defaults to disabled, so there's nothing to keep in sync with `KEYS`) and no Avo/admin UI. Toggling
+is done exclusively via `bin/rails console` — this was a specific choice to prevent an admin from
+accidentally flipping an integration off/on through a UI click, while still letting ops flip it
+instantly during an incident with no redeploy (the alternative considered and rejected: an
+ENV-var-driven flag mirroring `config/initializers/notifications.rb`'s adapter-selection pattern,
+which would require a redeploy to change).
+
+This round only built the flag scaffold — the actual HikCentral "add plate on truck registration"
+API call is separate future work, to be planned once needed.
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 234 examples, 0 failures
+docker compose run --rm web bin/rubocop                          # clean
+```
+
+Manually verified via `bin/rails runner`/`bin/rails console`: `FeatureFlag.enabled?(:hikcentral)`
+→ `false` with no row; `enable!`/`disable!` flip it as expected; `FeatureFlag.enabled?(:bogus)`
+raises `ArgumentError`.
+
 ---
 
 ## Project status
 
-All 10 originally planned phases are complete, plus the six post-v1 rounds above. Remaining work
+All 10 originally planned phases are complete, plus the eight post-v1 rounds above. Remaining work
 is listed in `CLAUDE.md`'s "Product scope" section (visit cancellation,
 `:order_issued`/`:getting_close` notifications, multi-site support, `en` locale) — none of it
 blocking, all explicitly out of v1 scope by design.

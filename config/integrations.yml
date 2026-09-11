@@ -1,0 +1,21 @@
+# Config for outbound third-party integrations, one top-level section per
+# integration, read via Integrations::Config.for(:name)
+# (app/services/integrations/config.rb). Secrets stay out of source control —
+# every value here is pulled from ENV via ERB, same as config/database.yml's
+# production password.
+default: &default
+  hikcentral:
+    base_url: <%= ENV["HIKCENTRAL_BASE_URL"] %>
+    app_key: <%= ENV["HIKCENTRAL_APP_KEY"] %>
+    app_secret: <%= ENV["HIKCENTRAL_APP_SECRET"] %>
+    vehicle_group_index_code: <%= ENV["HIKCENTRAL_VEHICLE_GROUP_INDEX_CODE"] %>
+    operator_user_id: <%= ENV["HIKCENTRAL_OPERATOR_USER_ID"] %>
+
+development:
+  <<: *default
+
+test:
+  <<: *default
+
+production:
+  <<: *default

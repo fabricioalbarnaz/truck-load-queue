@@ -22,13 +22,15 @@ module Hikcentral
       app_key: Integrations::Config.for(:hikcentral).app_key,
       app_secret: Integrations::Config.for(:hikcentral).app_secret,
       vehicle_group_index_code: Integrations::Config.for(:hikcentral).vehicle_group_index_code,
-      operator_user_id: Integrations::Config.for(:hikcentral).operator_user_id
+      operator_user_id: Integrations::Config.for(:hikcentral).operator_user_id,
+      verify_ssl: Integrations::Config.for(:hikcentral).verify_ssl
     )
       @base_url = base_url
       @app_key = app_key
       @app_secret = app_secret
       @vehicle_group_index_code = vehicle_group_index_code
       @operator_user_id = operator_user_id
+      @verify_ssl = verify_ssl
     end
 
     def add_vehicle(plate_no:, effective_date:, expired_date:, person_given_name: nil, phone_no: nil)
@@ -97,6 +99,7 @@ module Hikcentral
     def http_client(uri)
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = uri.scheme == "https"
+      http.verify_mode = OpenSSL::SSL::VERIFY_NONE unless @verify_ssl
       http.open_timeout = 10
       http.read_timeout = 10
       http

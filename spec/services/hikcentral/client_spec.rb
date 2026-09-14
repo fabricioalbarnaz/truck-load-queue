@@ -80,4 +80,31 @@ RSpec.describe Hikcentral::Client do
       }.to raise_error(Hikcentral::Client::RequestError)
     end
   end
+
+  describe "#http_client" do
+    # Explicit verify_ssl: on both clients here — never rely on the config
+    # default, since a developer's local .env may set HIKCENTRAL_VERIFY_SSL
+    # for their own manual testing and would silently flip these examples.
+    it "leaves certificate verification untouched (Net::HTTP's secure default) when verify_ssl is true" do
+      secure_client = described_class.new(
+        base_url: "https://hikcentral.example.com:443", app_key: "test-app-key", app_secret: "test-app-secret",
+        vehicle_group_index_code: "1", operator_user_id: "admin", verify_ssl: true
+      )
+
+      http = secure_client.send(:http_client, URI.parse(add_vehicle_url))
+
+      expect(http.verify_mode).to be_nil
+    end
+
+    it "disables certificate verification when verify_ssl is false" do
+      insecure_client = described_class.new(
+        base_url: "https://hikcentral.example.com:443", app_key: "test-app-key", app_secret: "test-app-secret",
+        vehicle_group_index_code: "1", operator_user_id: "admin", verify_ssl: false
+      )
+
+      http = insecure_client.send(:http_client, URI.parse(add_vehicle_url))
+
+      expect(http.verify_mode).to eq(OpenSSL::SSL::VERIFY_NONE)
+    end
+  end
 end

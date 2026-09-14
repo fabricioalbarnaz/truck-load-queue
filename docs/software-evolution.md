@@ -967,6 +967,14 @@ already-prefixed env-key form — the user's own `request.headers.each` inspecti
 the code as implemented. Verified with `curl -H "Token: <token>"` → `202`; missing/wrong `Token` →
 `401`; `/api/events` with `Authorization: Bearer` unaffected.
 
+**Follow-up fix — response status code**: the controller returned `202 Accepted` on success, which
+is the right REST-ful status for "queued for async processing" and matches the generic `/api/events`
+endpoint — but HikCentral's OpenAPI guide (section 4.3.3, "Restrictions and Suggestions") is
+specific that "the status code 200 should be returned after event receiving, or the openAPI
+platform will consider the event push failed" and retry every 24 hours. Changed this controller's
+success response to `200 OK` (JSON body unchanged) to match; the generic `/api/events` endpoint,
+used by non-HikCentral devices, is untouched and stays on `202`.
+
 ### Feature flags structure
 
 Different client deployments will need different behaviors — the concrete driver: after a truck is
@@ -1095,6 +1103,62 @@ docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 248 examples
 docker compose run --rm web bin/rubocop app/services/hikcentral/client.rb \
   app/services/integrations/config.rb spec/services/integrations/config_spec.rb  # clean
 ```
+
+**Follow-up — configurable SSL verification**: testing this against a real HikCentral instance
+running locally (outside Docker) surfaced `OpenSSL::SSL::SSLError: certificate verify failed
+(unable to get local issuer certificate)` — expected for an on-prem/dev VMS box using a self-signed
+cert, which `Net::HTTP`'s default verification correctly rejects. Added `verify_ssl` to
+`config/integrations.yml`'s `hikcentral` section (`ENV.fetch("HIKCENTRAL_VERIFY_SSL", "true")`,
+defaulting to verifying) and a matching `verify_ssl:` kwarg on `Hikcentral::Client`; `#http_client`
+sets `OpenSSL::SSL::VERIFY_NONE` only when it's explicitly `false`. `.env.example` documents
+`HIKCENTRAL_VERIFY_SSL` with an explicit "local/dev self-signed certs only, never production"
+warning.
+
+**Gotcha caught while writing the spec**: `Net::HTTP#verify_mode` is `nil` right after
+`use_ssl = true` — Ruby only applies the effective `OpenSSL::SSL::VERIFY_PEER` default lazily,
+inside `connect`, not as something readable on the object beforehand. Confirmed with a quick
+`bin/rails runner` check before writing the assertion, so the "verified" spec case asserts
+`verify_mode` stays `nil` (untouched, letting `Net::HTTP`'s own secure default apply at connect
+time) rather than asserting `VERIFY_PEER` directly.
+
+Separately, reaching a HikCentral instance running on the developer's Windows host (outside Docker)
+from the `web` container required `HIKCENTRAL_BASE_URL` to use `host.docker.internal`, not
+`127.0.0.1`/`localhost` — the latter resolves to the container's own loopback, not the host
+machine, under Docker Desktop.
+
+**Follow-up — unquoted ERB values in `config/integrations.yml` silently became the wrong YAML
+type**: testing `add_vehicle` against the real instance above returned `HTTP 200, code=2,
+msg=Incorrect request parameter. [vehicleGroupIndexCode parameter error]` even though the vehicle
+group the user configured (`"1"`, confirmed via `vehicleGroup/vehicleGroupList`) genuinely existed.
+Root cause: `vehicle_group_index_code: <%= ENV["HIKCENTRAL_VEHICLE_GROUP_INDEX_CODE"] %>` embeds
+the ENV value *unquoted* into the YAML — for a numeric-looking value like `"1"`, YAML parses the
+resulting bare `1` as an **Integer**, so `Integrations::Config.for(:hikcentral)
+.vehicle_group_index_code` returned `1` (Integer) instead of `"1"` (String), and the client's
+`.to_json` sent `"vehicleGroupIndexCode":1` — a JSON number HikCentral's API correctly rejects
+(the field is documented as a String). Confirmed via `bin/rails runner` before and after the fix.
+Fixed by quoting every ERB substitution meant to stay a String (`base_url`, `app_key`,
+`app_secret`, `vehicle_group_index_code`, `operator_user_id`) — `verify_ssl` stays unquoted since
+it's deliberately a real boolean. Added a regression spec asserting a numeric-looking ENV value
+comes back as a `String`.
+
+**Also caught while re-running the full suite for this fix**: the `#http_client` "verify_ssl: true"
+spec case relied on the shared `client` subject's default (unset `verify_ssl:`, resolving through
+`Integrations::Config`), which broke as soon as the developer's own `.env` gained
+`HIKCENTRAL_VERIFY_SSL=false` for their manual local testing above — a real environment leaking
+into what should've been a hermetic spec. Fixed by constructing an explicit `verify_ssl: true`
+client in that example too, matching the `verify_ssl: false` case, so neither example depends on
+`config/integrations.yml`'s resolved default.
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 251 examples, 0 failures
+docker compose run --rm web bin/rubocop app/services/integrations app/services/hikcentral \
+  spec/services/integrations spec/services/hikcentral               # clean
+```
+
+Not yet confirmed end-to-end against the user's real (locally-running, outside Docker) HikCentral
+instance — the type-fix above was verified via `bin/rails runner` (value now a String, serializes
+correctly) and the full spec suite, but `Hikcentral::AddVehicleService.new(truck:, driver:).call`
+actually succeeding against that live instance is still pending confirmation.
 
 ---
 

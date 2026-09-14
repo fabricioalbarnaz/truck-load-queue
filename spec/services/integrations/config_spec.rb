@@ -3,9 +3,10 @@ require "rails_helper"
 RSpec.describe Integrations::Config do
   describe ".for" do
     around do |example|
-      original = ENV["HIKCENTRAL_BASE_URL"]
+      keys = %w[HIKCENTRAL_BASE_URL HIKCENTRAL_VEHICLE_GROUP_INDEX_CODE]
+      original = keys.index_with { |key| ENV[key] }
       example.run
-      ENV["HIKCENTRAL_BASE_URL"] = original
+      original.each { |key, value| value.nil? ? ENV.delete(key) : ENV[key] = value }
     end
 
     it "wraps the named integration's section with dot-access read from ENV" do
@@ -15,6 +16,15 @@ RSpec.describe Integrations::Config do
 
       expect(config.base_url).to eq("https://hikcentral.example.com")
       expect(config).to respond_to(:app_key)
+    end
+
+    it "keeps a numeric-looking ENV value as a String, not a YAML Integer" do
+      ENV["HIKCENTRAL_VEHICLE_GROUP_INDEX_CODE"] = "1"
+
+      config = described_class.for(:hikcentral)
+
+      expect(config.vehicle_group_index_code).to eq("1")
+      expect(config.vehicle_group_index_code).to be_a(String)
     end
 
     it "raises UnknownIntegrationError for a name not in config/integrations.yml" do

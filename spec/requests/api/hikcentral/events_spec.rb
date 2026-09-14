@@ -42,13 +42,13 @@ RSpec.describe "Api::Hikcentral::Events", type: :request do
       expect(response).to have_http_status(:unauthorized)
     end
 
-    it "returns 202, persists a truck_detected Event, and reports it as accepted" do
+    it "returns 200, persists a truck_detected Event, and reports it as accepted" do
       expect {
         post "/api/hikcentral/events", params: push_with([ anpr_event ]), as: :json,
                                         headers: { "HTTP_TOKEN" => token }
       }.to change(Event, :count).by(1)
 
-      expect(response).to have_http_status(:accepted)
+      expect(response).to have_http_status(:ok)
       body = response.parsed_body
       expect(body["skipped"]).to eq(0)
       expect(body["accepted"].sole["status"]).to eq("pending")
@@ -59,25 +59,25 @@ RSpec.describe "Api::Hikcentral::Events", type: :request do
       expect(event.payload).to eq("plate" => "EZL3101")
     end
 
-    it "returns 202 and skips, without persisting, an event with an unrecognized eventType" do
+    it "returns 200 and skips, without persisting, an event with an unrecognized eventType" do
       expect {
         post "/api/hikcentral/events", params: push_with([ anpr_event(event_type: 197391) ]), as: :json,
                                         headers: { "HTTP_TOKEN" => token }
       }.not_to change(Event, :count)
 
-      expect(response).to have_http_status(:accepted)
+      expect(response).to have_http_status(:ok)
       body = response.parsed_body
       expect(body["accepted"]).to be_empty
       expect(body["skipped"]).to eq(1)
     end
 
-    it "returns 202 and skips, without persisting, a plateNo of Unknown" do
+    it "returns 200 and skips, without persisting, a plateNo of Unknown" do
       expect {
         post "/api/hikcentral/events", params: push_with([ anpr_event(plate_no: "Unknown") ]), as: :json,
                                         headers: { "HTTP_TOKEN" => token }
       }.not_to change(Event, :count)
 
-      expect(response).to have_http_status(:accepted)
+      expect(response).to have_http_status(:ok)
       expect(response.parsed_body["skipped"]).to eq(1)
     end
 

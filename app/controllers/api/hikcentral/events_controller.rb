@@ -4,10 +4,13 @@ module Api
       def create
         result = Events::Adapters::HikcentralAdapter.new(params.to_unsafe_h).call
 
+        # HikCentral's OpenAPI guide (section 4.3.3) requires exactly HTTP 200 on
+        # receipt, or it considers the push failed and retries every 24 hours —
+        # unlike the generic /api/events endpoint, 202 Accepted isn't honored here.
         render json: {
           accepted: result[:accepted].map { |event| { id: event.id, status: event.status } },
           skipped: result[:skipped_count]
-        }, status: :accepted
+        }, status: :ok
       rescue Events::Adapters::HikcentralAdapter::InvalidPushError => e
         render json: { errors: [ e.message ] }, status: :unprocessable_content
       end

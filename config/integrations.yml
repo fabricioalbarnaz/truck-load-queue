@@ -5,11 +5,16 @@
 # production password.
 default: &default
   hikcentral:
-    base_url: <%= ENV["HIKCENTRAL_BASE_URL"] %>
-    app_key: <%= ENV["HIKCENTRAL_APP_KEY"] %>
-    app_secret: <%= ENV["HIKCENTRAL_APP_SECRET"] %>
-    vehicle_group_index_code: <%= ENV["HIKCENTRAL_VEHICLE_GROUP_INDEX_CODE"] %>
-    operator_user_id: <%= ENV["HIKCENTRAL_OPERATOR_USER_ID"] %>
+    # Quoted so a numeric-looking ENV value (e.g. a vehicle_group_index_code
+    # of "1") stays a YAML/JSON String, not an Integer — HikCentral's API
+    # rejects these fields as a parameter type error otherwise, even when the
+    # numeric value itself would be correct.
+    base_url: "<%= ENV["HIKCENTRAL_BASE_URL"] %>"
+    app_key: "<%= ENV["HIKCENTRAL_APP_KEY"] %>"
+    app_secret: "<%= ENV["HIKCENTRAL_APP_SECRET"] %>"
+    vehicle_group_index_code: "<%= ENV["HIKCENTRAL_VEHICLE_GROUP_INDEX_CODE"] %>"
+    operator_user_id: "<%= ENV["HIKCENTRAL_OPERATOR_USER_ID"] %>"
+    verify_ssl: <%= ENV.fetch("HIKCENTRAL_VERIFY_SSL", "true") == "true" %>
 
 development:
   <<: *default

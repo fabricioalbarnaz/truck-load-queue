@@ -177,5 +177,30 @@ RSpec.describe Visits::CheckInService do
         expect(new_truck.errors[:plate]).to be_present
       end
     end
+
+    context "HikCentral vehicle-list sync" do
+      it "does not enqueue a sync job when the feature flag is disabled" do
+        expect {
+          described_class.new(driver: driver, truck: truck, checked_in_by: operator).call
+        }.not_to have_enqueued_job(Hikcentral::AddVehicleJob)
+      end
+
+      it "enqueues a sync job for a not-yet-synced truck when the feature flag is enabled" do
+        create(:feature_flag, :hikcentral, enabled: true)
+
+        expect {
+          described_class.new(driver: driver, truck: truck, checked_in_by: operator).call
+        }.to have_enqueued_job(Hikcentral::AddVehicleJob).with(truck_id: truck.id, driver_id: driver.id)
+      end
+
+      it "does not enqueue a sync job for a truck that was already synced" do
+        create(:feature_flag, :hikcentral, enabled: true)
+        truck.update!(hikcentral_synced_at: Time.current)
+
+        expect {
+          described_class.new(driver: driver, truck: truck, checked_in_by: operator).call
+        }.not_to have_enqueued_job(Hikcentral::AddVehicleJob)
+      end
+    end
   end
 end

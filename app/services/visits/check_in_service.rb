@@ -24,10 +24,18 @@ module Visits
         raise ActiveRecord::Rollback if @visit.errors.present?
       end
 
+      sync_to_hikcentral! if @visit.persisted?
+
       @visit
     end
 
     private
+
+    def sync_to_hikcentral!
+      return unless FeatureFlag.enabled?(:hikcentral) && @truck.hikcentral_synced_at.nil?
+
+      Hikcentral::AddVehicleService.enqueue(truck: @truck, driver: @driver)
+    end
 
     def issue_order!
       Visits::IssueOrderService.new(

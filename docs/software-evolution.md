@@ -967,6 +967,14 @@ already-prefixed env-key form — the user's own `request.headers.each` inspecti
 the code as implemented. Verified with `curl -H "Token: <token>"` → `202`; missing/wrong `Token` →
 `401`; `/api/events` with `Authorization: Bearer` unaffected.
 
+**Follow-up fix — response status code**: the controller returned `202 Accepted` on success, which
+is the right REST-ful status for "queued for async processing" and matches the generic `/api/events`
+endpoint — but HikCentral's OpenAPI guide (section 4.3.3, "Restrictions and Suggestions") is
+specific that "the status code 200 should be returned after event receiving, or the openAPI
+platform will consider the event push failed" and retry every 24 hours. Changed this controller's
+success response to `200 OK` (JSON body unchanged) to match; the generic `/api/events` endpoint,
+used by non-HikCentral devices, is untouched and stays on `202`.
+
 ### Feature flags structure
 
 Different client deployments will need different behaviors — the concrete driver: after a truck is
@@ -1003,11 +1011,160 @@ Manually verified via `bin/rails runner`/`bin/rails console`: `FeatureFlag.enabl
 → `false` with no row; `enable!`/`disable!` flip it as expected; `FeatureFlag.enabled?(:bogus)`
 raises `ArgumentError`.
 
+### HikCentral outbound vehicle-list sync on check-in
+
+This closes the loop the "Feature flags structure" round above anticipated but deliberately left
+unbuilt: after a truck checks in, and only when `FeatureFlag.enabled?(:hikcentral)`, the app now
+calls HikCentral's OpenAPI to add the truck's plate to a vehicle list (an access whitelist a gate/
+ANPR camera checks against), the same vendor referenced by the inbound ANPR-ingestion round above
+— but this is the first **outbound** call to HikCentral; everything before this synced data the
+other direction (HikCentral → app).
+
+Per the vendor's OpenAPI guide (`docs/HikCentral Professional OpenAPI V3.1.1_Developer
+Guide...pdf`, "Manage Vehicles" p.47-49, full request/response spec p.257-260), the relevant call is
+`POST /artemis/api/resource/v1/vehicle/single/add`, authenticated with HikCentral's AK/SK
+HMAC-SHA256 request signing (doc §3.2) — a scheme with no existing precedent in this repo (the
+inbound webhook side only *validates* a shared-secret `Token` header on incoming requests; it never
+signs outgoing ones), and no HTTP client gem beyond `twilio-ruby` (Twilio-specific), so this was
+built on stdlib `Net::HTTP` rather than adding a new dependency.
+
+**Decisions made with the user before implementing**: sync once per **truck** (not per visit) —
+skip the API call if that truck was already synced, tracked via a new `trucks.hikcentral_synced_at`
+timestamp, rather than re-adding/updating the same plate on every repeat visit; a long-lived
+validity window (`effectiveDate` = now, `expiredDate` = 5 years out, no renewal/removal logic — same
+"explicitly out of scope for now" treatment as visit cancellation); and sending the driver's name
+and phone (`personGivenName`/`phoneNo`) in addition to the plate, so the vendor's vehicle record is
+identifiable to yard/security staff reviewing HikCentral's own UI.
+
+**What was created**:
+- `trucks.hikcentral_synced_at` (datetime, nullable) — the per-truck "already added" marker,
+  following the same timestamp-per-milestone convention as `Visit`'s `entered_yard_at`/
+  `order_issued_at`/etc.
+- `Hikcentral::Client` (`app/services/hikcentral/client.rb`) — builds the AK/SK-signed request
+  (Content-MD5, Content-Type, Date, `X-Ca-Key`, `X-Ca-Timestamp`, `X-Ca-Signature`) and posts JSON
+  to `vehicle/single/add`, raising `Hikcentral::Client::RequestError` on a non-2xx HTTP response or
+  a parsed body `code != "0"` (HikCentral's own success/failure signal, independent of HTTP status).
+  Credentials (`HIKCENTRAL_BASE_URL`/`APP_KEY`/`APP_SECRET`/`VEHICLE_GROUP_INDEX_CODE`/
+  `OPERATOR_USER_ID`) default from `ENV`, mirroring `TwilioSmsAdapter`'s constructor pattern — added
+  to `.env.example` with the same "placeholder, confirm against the real instance" caveat already
+  used for the inbound events contract, since `vehicleGroupIndexCode` names a vehicle list that has
+  to already exist on the HikCentral side.
+- `Hikcentral::AddVehicleService` (`.enqueue`/`#call`) + `Hikcentral::AddVehicleJob` — mirrors
+  `Notifications::NotifyDriverService`/`SendNotificationJob` exactly: `.enqueue(truck:, driver:)`
+  enqueues the job; the job re-checks `hikcentral_synced_at.nil?` (defensive against a duplicate
+  enqueue) before calling the service, which calls the client and marks the truck synced on success.
+  Same `queue_as :default`, `retry_on StandardError, wait: :polynomially_longer, attempts: 5` as
+  every other job in the app.
+- `Visits::CheckInService#call` now enqueues the sync job after a successful check-in, guarded by
+  `FeatureFlag.enabled?(:hikcentral) && truck.hikcentral_synced_at.nil?` — same "guarded enqueue
+  after a state change, from the service, not a model callback" shape `IssueOrderService` already
+  uses for its notification trigger.
+
+**Testing note**: no VCR cassette (unlike the Twilio adapters) — there's no real HikCentral sandbox
+to record a cassette against, so `Hikcentral::Client`'s spec stubs the HTTP call directly with
+WebMock instead, asserting the signed headers and request body shape.
+
+**Gotcha while writing the service spec**: asserting `expired_date - effective_date == 5.years`
+(or `be_within(1).of(5.years)`) fails intermittently — `Time#+ 5.years` advances the calendar
+correctly (accounting for however many real leap days fall in that span), so the actual elapsed
+seconds vary by up to a day or two from `5.years.to_i`'s fixed 365.25-day-average conversion. Fixed
+by widening the tolerance to `be_within(3.days.to_i)`.
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 246 examples, 0 failures
+docker compose run --rm web bin/rubocop app/services/hikcentral app/jobs/hikcentral \
+  app/services/visits/check_in_service.rb spec/services/hikcentral spec/jobs/hikcentral \
+  spec/services/visits/check_in_service_spec.rb                  # clean
+```
+
+Not yet manually verified end-to-end against a real HikCentral instance — no real
+`HIKCENTRAL_BASE_URL`/AK/SK/vehicle-group-ID were available to test against. Verified so far:
+`FeatureFlag.enabled?(:hikcentral)` false by default → check-in behaves exactly as before, no job
+enqueued; flag enabled + new truck → job enqueued with the right IDs; flag enabled + already-synced
+truck → no job enqueued (both via the full spec suite, not manual clicking).
+
+**Follow-up — generic integrations config**: `Hikcentral::Client` initially read its 5 settings
+straight from `ENV`, matching the Twilio adapters. The user asked for this to go through a config
+YAML instead, generalized so future integrations can share the same file/class rather than each
+inventing its own — `config/integrations.yml` (one `default: &default` anchor, a `hikcentral:`
+section, each value still ERB-pulled from the same `ENV["HIKCENTRAL_*"]` vars, per-env `<<: *default`
+like `config/database.yml`) plus `Integrations::Config` (`app/services/integrations/config.rb`),
+whose `.for(name)` is the only call site `Hikcentral::Client`'s constructor now defaults from.
+**Gotcha caught by a quick `bin/rails runner` probe before writing the class**: `Rails.application
+.config_for` only gives dot-access at the *top* level of the YAML — a nested section like
+`hikcentral:` comes back as a plain symbol-keyed `Hash`, not something `.base_url`-callable. `.for`
+re-wraps that section in `ActiveSupport::OrderedOptions` (the same class Rails itself uses for the
+top level) to get the same dot-access one level down. Raises `Integrations::Config
+::UnknownIntegrationError` for a name not in the file, mirroring `FeatureFlag`'s
+raise-on-unknown-key style.
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 248 examples, 0 failures
+docker compose run --rm web bin/rubocop app/services/hikcentral/client.rb \
+  app/services/integrations/config.rb spec/services/integrations/config_spec.rb  # clean
+```
+
+**Follow-up — configurable SSL verification**: testing this against a real HikCentral instance
+running locally (outside Docker) surfaced `OpenSSL::SSL::SSLError: certificate verify failed
+(unable to get local issuer certificate)` — expected for an on-prem/dev VMS box using a self-signed
+cert, which `Net::HTTP`'s default verification correctly rejects. Added `verify_ssl` to
+`config/integrations.yml`'s `hikcentral` section (`ENV.fetch("HIKCENTRAL_VERIFY_SSL", "true")`,
+defaulting to verifying) and a matching `verify_ssl:` kwarg on `Hikcentral::Client`; `#http_client`
+sets `OpenSSL::SSL::VERIFY_NONE` only when it's explicitly `false`. `.env.example` documents
+`HIKCENTRAL_VERIFY_SSL` with an explicit "local/dev self-signed certs only, never production"
+warning.
+
+**Gotcha caught while writing the spec**: `Net::HTTP#verify_mode` is `nil` right after
+`use_ssl = true` — Ruby only applies the effective `OpenSSL::SSL::VERIFY_PEER` default lazily,
+inside `connect`, not as something readable on the object beforehand. Confirmed with a quick
+`bin/rails runner` check before writing the assertion, so the "verified" spec case asserts
+`verify_mode` stays `nil` (untouched, letting `Net::HTTP`'s own secure default apply at connect
+time) rather than asserting `VERIFY_PEER` directly.
+
+Separately, reaching a HikCentral instance running on the developer's Windows host (outside Docker)
+from the `web` container required `HIKCENTRAL_BASE_URL` to use `host.docker.internal`, not
+`127.0.0.1`/`localhost` — the latter resolves to the container's own loopback, not the host
+machine, under Docker Desktop.
+
+**Follow-up — unquoted ERB values in `config/integrations.yml` silently became the wrong YAML
+type**: testing `add_vehicle` against the real instance above returned `HTTP 200, code=2,
+msg=Incorrect request parameter. [vehicleGroupIndexCode parameter error]` even though the vehicle
+group the user configured (`"1"`, confirmed via `vehicleGroup/vehicleGroupList`) genuinely existed.
+Root cause: `vehicle_group_index_code: <%= ENV["HIKCENTRAL_VEHICLE_GROUP_INDEX_CODE"] %>` embeds
+the ENV value *unquoted* into the YAML — for a numeric-looking value like `"1"`, YAML parses the
+resulting bare `1` as an **Integer**, so `Integrations::Config.for(:hikcentral)
+.vehicle_group_index_code` returned `1` (Integer) instead of `"1"` (String), and the client's
+`.to_json` sent `"vehicleGroupIndexCode":1` — a JSON number HikCentral's API correctly rejects
+(the field is documented as a String). Confirmed via `bin/rails runner` before and after the fix.
+Fixed by quoting every ERB substitution meant to stay a String (`base_url`, `app_key`,
+`app_secret`, `vehicle_group_index_code`, `operator_user_id`) — `verify_ssl` stays unquoted since
+it's deliberately a real boolean. Added a regression spec asserting a numeric-looking ENV value
+comes back as a `String`.
+
+**Also caught while re-running the full suite for this fix**: the `#http_client` "verify_ssl: true"
+spec case relied on the shared `client` subject's default (unset `verify_ssl:`, resolving through
+`Integrations::Config`), which broke as soon as the developer's own `.env` gained
+`HIKCENTRAL_VERIFY_SSL=false` for their manual local testing above — a real environment leaking
+into what should've been a hermetic spec. Fixed by constructing an explicit `verify_ssl: true`
+client in that example too, matching the `verify_ssl: false` case, so neither example depends on
+`config/integrations.yml`'s resolved default.
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 251 examples, 0 failures
+docker compose run --rm web bin/rubocop app/services/integrations app/services/hikcentral \
+  spec/services/integrations spec/services/hikcentral               # clean
+```
+
+Not yet confirmed end-to-end against the user's real (locally-running, outside Docker) HikCentral
+instance — the type-fix above was verified via `bin/rails runner` (value now a String, serializes
+correctly) and the full spec suite, but `Hikcentral::AddVehicleService.new(truck:, driver:).call`
+actually succeeding against that live instance is still pending confirmation.
+
 ---
 
 ## Project status
 
-All 10 originally planned phases are complete, plus the eight post-v1 rounds above. Remaining work
+All 10 originally planned phases are complete, plus the nine post-v1 rounds above. Remaining work
 is listed in `CLAUDE.md`'s "Product scope" section (visit cancellation,
 `:order_issued`/`:getting_close` notifications, multi-site support, `en` locale) — none of it
 blocking, all explicitly out of v1 scope by design.

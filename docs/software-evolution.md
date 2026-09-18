@@ -33,10 +33,9 @@ historical narrative lives here).
 | 9 | Test coverage + styling | ✅ Done |
 | 10 | Production hardening | ✅ Done |
 
-All 10 phases of the original v1 plan are done. After v1 shipped, four more rounds of work
-happened (see "Post-v1 changes" below): inline driver/truck registration on check-in, an events
-ingestion pipeline for future device integrations, a live Railway test deployment, and order
-numbers on visits.
+All 10 phases of the original v1 plan are done. After v1 shipped, ten more rounds of work happened
+(see "Post-v1 changes" below), from inline driver/truck registration on check-in through the
+`getting_ready` visit status added most recently.
 
 ---
 
@@ -629,7 +628,7 @@ container connected to Redis and booted Sidekiq cleanly without re-running `db:p
 
 ## Post-v1 changes
 
-Six rounds of work happened after all 10 phases shipped. Design docs for two of them
+Ten rounds of work happened after all 10 phases shipped. Design docs for two of them
 (`docs/events-plan.md`, `docs/railway-deploy-plan.md`) were written before execution and kept
 updated in place as execution logs — they're retained as source material alongside this file.
 
@@ -1160,14 +1159,112 @@ instance — the type-fix above was verified via `bin/rails runner` (value now a
 correctly) and the full spec suite, but `Hikcentral::AddVehicleService.new(truck:, driver:).call`
 actually succeeding against that live instance is still pending confirmation.
 
+### `getting_ready` visit status + "get ready to load" driver alert
+
+Previously a driver only heard from the system at the exact moment the bay freed up —
+`Visits::PromoteNextService` flipped the head of the queue from `queued` straight to `loading` with
+no lead time. Added a new status between them: `in_yard → queued → getting_ready → loading →
+finished`. While a truck is `loading`, the next truck in line is automatically moved to
+`getting_ready` and sent a new `:get_ready` SMS/WhatsApp alert, giving it a full loading cycle of
+lead time; when the loading truck finishes, the `getting_ready` truck is promoted to `loading`
+(existing `:your_turn` alert) and the new head of queue becomes `getting_ready` in the same step.
+Fully automatic — no new operator button, route, or policy method. This delivers the
+`:getting_close` item from `CLAUDE.md`'s "Future improvements" list (removed from there now).
+
+**What changed**:
+- **`Visit` model**: `getting_ready` inserted into the `status` enum (plain string column, no schema
+  constraint to touch); `ACTIVE_STATUSES` and `PUBLIC_QUEUE_RELEVANT_STATUSES` both extended to
+  include it (the former so the driver/truck double-booking guard still catches a truck that's
+  getting ready, the latter so the transition triggers a live public-board broadcast);
+  `active_queue` scope extended; `queue_position` now counts `%w[queued getting_ready]` ahead of a
+  visit, so `getting_ready` naturally computes to position 1. New `getting_ready_at` timestamp
+  column (migration `20260918134249`), matching every other status having its own `*_at`. New
+  `STATUS_LABELS` hash + `#status_label` — a plain Ruby constant, not I18n, matching the app's
+  existing convention of hardcoded pt-BR strings (there is no locale structure for status names
+  anywhere in the codebase to extend).
+- **`Visits::PromoteNextService`** became a two-slot reconciler instead of a single `queued →
+  loading` promotion: `fill_loading_slot` (no-op if something is already loading; otherwise
+  promotes the earliest `getting_ready`-or-`queued` visit) runs first, then `fill_getting_ready_slot`
+  (no-op unless something is loading and nothing is yet getting ready; otherwise promotes the
+  earliest `queued` visit). `#call` keeps its original no-arg, single-return-value contract, so
+  `Visits::FinishLoadingService` needed zero changes.
+- **`Visits::IssueOrderService`** no longer decides `loading` vs. `queued` itself — it always writes
+  the order fields with `status: :queued` inside a transaction, then delegates to
+  `PromoteNextService`, then reloads (guarded on `errors.empty?`, so a validation failure's
+  in-memory-only status assignment — the same trap noted in Phase 4 — never overwrites `.errors`).
+  This removed the old `queue_empty?` duplicate-logic helper; the promotion policy now lives in
+  exactly one place.
+- **Notifications**: new `get_ready:` entry in `Notifications::NotifyDriverService::MESSAGES` — the
+  event-registry pattern (a Symbol key, a message-building lambda) needed no other changes;
+  `Dispatcher`, the Twilio/Test adapters, and `SendNotificationJob` are all event-agnostic.
+- **Public board** (`app/views/public/queue/_board.html.erb`): new "Prepare-se" section between
+  "Carregando agora" and "Próximos", amber-styled (`.getting-ready` class, explicit rules rather than
+  the existing `section:first-of-type` positional selector, which still correctly targets only the
+  loading section since the new one is inserted after it). The "Próximos" list's CSS counter gets an
+  `.offset` class (`counter-reset: queue-position 1`) whenever a truck is getting ready, so its
+  numbering starts at 2 — matching `queue_position` instead of double-counting position 1.
+- **Operator screens**: `QueueScreen::VisitsController`/view gained a read-only "Prepare-se" block
+  (no button — promotion is automatic); `Expedition::VisitsController`'s queue table now calls
+  `visit.status_label` instead of a `loading? ? "Carregando" : "Na fila"` ternary that silently
+  mislabeled a `getting_ready` visit as "Na fila".
+
+**Deviations / gotchas discovered during execution**:
+- **The dev DB already had leftover `loading`/`finished` visit rows** from earlier manual testing of
+  the running app, unrelated to this work. A first `bin/rails runner` sanity check of the promotion
+  chain gave a wrong-looking result (`loading` skipped straight to `getting_ready`) until this was
+  spotted — the leftover `loading` row made the scenario's "empty queue" assumption false. Fixed by
+  neutralizing pre-existing active visits inside the same rolled-back transaction; nothing in dev
+  data was permanently touched.
+- **`ActionDispatch::Integration::Session` in a bare `bin/rails runner` script hits `config.hosts`'s
+  `Blocked hosts: www.example.com`** (the default integration-test host isn't in the allow-list
+  outside the `test` environment) — fixed with `session.host! "localhost"`. Signing in via a scripted
+  POST additionally 422's without a real form/CSRF round-trip; this repo's existing docs already flag
+  the same curl-based limitation (Phase 4), so authenticated-screen verification for this feature
+  relied on the real request/system specs instead.
+- **The expedition "issue order" form reuses the same field id per row** (`form_with ... scope:
+  :visit` inside a `.each` loop generates `visit_order_number` for every row) — invisible until the
+  system spec had two trucks in the yard simultaneously for the first time, which made `fill_in`
+  raise `Capybara::Ambiguous`. Fixed in the spec with `within("tr", text: driver.name) { ... }`; the
+  underlying view has had this latent duplicate-id issue since Phase 4, unrelated to this change.
+- **The "Prepare-se" heading renders as "PREPARE-SE" in the actual browser** (`text-transform:
+  uppercase` on `#public_queue h2`) — a case-sensitive Capybara `have_content` match against the
+  literal source string failed even though the correct text was present; fixed with a case-
+  insensitive regex match in the system spec.
+- **A pre-existing, unrelated spec regressed and was fixed as a side effect**:
+  `spec/services/visits/check_in_service_spec.rb`'s "queues the visit when another one is already
+  loading" example exercises `IssueOrderService` indirectly (check-in with an immediate
+  `order_number` routes through it) — missed during initial exploration since it's a `CheckInService`
+  spec, not an `IssueOrderService` one. Caught by the full suite run; updated identically to the
+  `Expedition::VisitsController` request spec (now expects `getting_ready`).
+- **One system spec failure is pre-existing and unrelated to this feature**:
+  `spec/system/truck_detected_checkin_autofill_spec.rb` fails on `main` as of this round, caused by
+  separate, already-in-progress, uncommitted changes to `app/controllers/registration/
+  trucks_controller.rb` and `app/javascript/controllers/lookup_controller.js` (a "don't let a live
+  plate-detection overwrite what the operator already typed" change whose spec wasn't updated to
+  match). Confirmed via `git stash` isolation — the spec passes cleanly with just those two files
+  reverted. Left untouched; out of scope for this round.
+
+```bash
+docker compose run --rm -e RAILS_ENV=test web bin/rails db:prepare
+docker compose run --rm -e RAILS_ENV=test web bundle exec rspec   # 258 examples, 1 failure (pre-existing, see above)
+docker compose run --rm web bin/rubocop   # clean on every file this round touched
+docker compose run --rm web bin/brakeman -q                      # 0 warnings
+```
+
+Verified manually via `bin/rails runner`-scripted scenarios (rolled back, no lasting DB changes): a
+three-truck sequence correctly lands on `loading`/`getting_ready`/`queued` with matching
+`queue_position`s of 0/1/2; finishing the loading truck cascades both promotions in one call; the
+public board and both operator screens render the new section/label correctly via a real
+`ActionDispatch::Integration::Session` request. Not yet verified against a real browser session
+(Capybara/Cuprite covers this instead) or the Railway test deployment.
+
 ---
 
 ## Project status
 
-All 10 originally planned phases are complete, plus the nine post-v1 rounds above. Remaining work
-is listed in `CLAUDE.md`'s "Product scope" section (visit cancellation,
-`:order_issued`/`:getting_close` notifications, multi-site support, `en` locale) — none of it
-blocking, all explicitly out of v1 scope by design.
+All 10 originally planned phases are complete, plus the ten post-v1 rounds above. Remaining work
+is listed in `CLAUDE.md`'s "Product scope" section (visit cancellation, `:order_issued` notification,
+multi-site support, `en` locale) — none of it blocking, all explicitly out of v1 scope by design.
 
 A genuinely production deploy would still need: a durable (non-trial) Postgres/Redis host,
 `config.hosts` set to the real domain (currently unset/permissive), a real `RAILS_MASTER_KEY`

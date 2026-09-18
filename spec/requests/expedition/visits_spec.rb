@@ -36,14 +36,14 @@ RSpec.describe "Expedition::Visits", type: :request do
       expect(visit.order_issued_by).to eq(expedition_user)
     end
 
-    it "queues the visit when another one is already loading" do
+    it "sends the visit to getting_ready when another one is already loading" do
       create(:visit, :loading)
       visit = create(:visit)
       sign_in expedition_user
 
       patch issue_order_expedition_visit_path(visit), params: { visit: { order_number: "OC-123" } }
 
-      expect(visit.reload).to be_queued
+      expect(visit.reload).to be_getting_ready
     end
 
     it "does not issue the order when no order number is given" do

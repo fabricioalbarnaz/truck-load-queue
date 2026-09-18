@@ -25,7 +25,10 @@ RSpec.describe Visit, type: :model do
 
   it {
     is_expected.to define_enum_for(:status)
-      .with_values(in_yard: "in_yard", queued: "queued", loading: "loading", finished: "finished")
+      .with_values(
+        in_yard: "in_yard", queued: "queued", getting_ready: "getting_ready",
+        loading: "loading", finished: "finished"
+      )
       .backed_by_column_of_type(:string)
   }
 
@@ -55,12 +58,13 @@ RSpec.describe Visit, type: :model do
   end
 
   describe ".active_queue" do
-    it "returns queued and loading visits ordered by order_issued_at" do
-      later = create(:visit, :queued, order_issued_at: 2.minutes.ago)
-      earlier = create(:visit, :loading, order_issued_at: 5.minutes.ago)
+    it "returns queued, getting_ready and loading visits ordered by order_issued_at" do
+      latest = create(:visit, :queued, order_issued_at: 2.minutes.ago)
+      middle = create(:visit, :getting_ready, order_issued_at: 3.minutes.ago)
+      earliest = create(:visit, :loading, order_issued_at: 5.minutes.ago)
       create(:visit) # in_yard, not part of the active queue
 
-      expect(Visit.active_queue).to eq([ earlier, later ])
+      expect(Visit.active_queue).to eq([ earliest, middle, latest ])
     end
   end
 
@@ -68,6 +72,16 @@ RSpec.describe Visit, type: :model do
     it "is 0 for a visit that is loading" do
       visit = create(:visit, :loading)
       expect(visit.queue_position).to eq(0)
+    end
+
+    it "puts the getting_ready visit at position 1, ahead of the queued visits" do
+      getting_ready = create(:visit, :getting_ready, order_issued_at: 3.minutes.ago)
+      first_queued = create(:visit, :queued, order_issued_at: 2.minutes.ago)
+      second_queued = create(:visit, :queued, order_issued_at: 1.minute.ago)
+
+      expect(getting_ready.queue_position).to eq(1)
+      expect(first_queued.queue_position).to eq(2)
+      expect(second_queued.queue_position).to eq(3)
     end
 
     it "reflects FIFO order among queued visits" do
@@ -94,6 +108,15 @@ RSpec.describe Visit, type: :model do
         .with("public_queue", hash_including(target: "public_queue", partial: "public/queue/board"))
 
       visit.update(status: :queued, order_number: "OC-123", order_issued_at: Time.current)
+    end
+
+    it "broadcasts when a visit moves from queued to getting_ready" do
+      visit = create(:visit, :queued)
+
+      expect(Turbo::StreamsChannel).to receive(:broadcast_replace_to)
+        .with("public_queue", hash_including(target: "public_queue", partial: "public/queue/board"))
+
+      visit.update(status: :getting_ready, getting_ready_at: Time.current)
     end
 
     it "broadcasts when a visit finishes" do

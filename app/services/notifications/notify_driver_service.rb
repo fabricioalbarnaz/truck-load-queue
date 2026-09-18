@@ -3,6 +3,10 @@ module Notifications
     MESSAGES = {
       your_turn: ->(visit) {
         "#{visit.driver.name}, é a sua vez de carregar! Dirija-se à balança com o caminhão #{visit.truck.plate}."
+      },
+      get_ready: ->(visit) {
+        "#{visit.driver.name}, prepare-se! Você é o próximo a carregar com o caminhão " \
+        "#{visit.truck.plate}. Aguarde a chamada e posicione-se para entrar no carregamento."
       }
     }.freeze
 

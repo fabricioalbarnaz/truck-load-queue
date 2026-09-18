@@ -12,6 +12,13 @@ FactoryBot.define do
       order_issued_at { Time.current }
     end
 
+    trait :getting_ready do
+      status { "getting_ready" }
+      order_number { "OC-#{SecureRandom.hex(4)}" }
+      order_issued_at { Time.current }
+      getting_ready_at { Time.current }
+    end
+
     trait :loading do
       status { "loading" }
       order_number { "OC-#{SecureRandom.hex(4)}" }

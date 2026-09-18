@@ -11,7 +11,7 @@ module Registration
       authorize Truck, :lookup?
 
       plate = params[:plate]
-      truck = plate.present? ? Truck.find_by(plate: Truck.normalize_value_for(:plate, plate)) : nil
+      truck = plate.present? ? Truck.find_by(plate: Truck.normalize_value_for(:plate, plate), active: true) : nil
 
       if truck
         render json: { found: true, record: { model: truck.model, capacity: truck.capacity } }

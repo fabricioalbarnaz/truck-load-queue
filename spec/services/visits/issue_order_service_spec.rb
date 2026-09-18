@@ -18,8 +18,23 @@ RSpec.describe Visits::IssueOrderService do
       expect(result.loading_started_at).to be_present
     end
 
-    it "queues the visit when another visit is already loading" do
+    it "sends the visit to getting_ready when another visit is already loading" do
       create(:visit, :loading)
+      visit = create(:visit)
+
+      result = nil
+      expect {
+        result = described_class.new(visit: visit, order_issued_by: operator, order_number: "OC-123").call
+      }.to have_enqueued_job(SendNotificationJob).with(visit_id: visit.id, event: "get_ready")
+
+      expect(result).to be_getting_ready
+      expect(result.getting_ready_at).to be_present
+      expect(result.loading_started_at).to be_nil
+    end
+
+    it "queues the visit when another is loading and one is already getting ready" do
+      create(:visit, :loading)
+      create(:visit, :getting_ready)
       visit = create(:visit)
 
       result = nil
@@ -29,15 +44,6 @@ RSpec.describe Visits::IssueOrderService do
 
       expect(result).to be_queued
       expect(result.loading_started_at).to be_nil
-    end
-
-    it "queues the visit when another visit is already queued" do
-      create(:visit, :queued)
-      visit = create(:visit)
-
-      result = described_class.new(visit: visit, order_issued_by: operator, order_number: "OC-123").call
-
-      expect(result).to be_queued
     end
 
     it "fails and leaves the visit in_yard when the order number is blank" do

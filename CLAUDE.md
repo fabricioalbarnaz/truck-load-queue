@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project
 
 Rails 8 app for a mining company's truck loading queue management system (registration → yard
-check-in → order issuance → queue → loading → finished, with SMS/WhatsApp notifications and a
-public real-time screen). Greenfield, built incrementally in 10 phases.
+check-in → order issuance → queue → get ready → loading → finished, with SMS/WhatsApp notifications
+and a public real-time screen). Greenfield, built incrementally in 10 phases.
 
 **This file is the architecture/design reference** (data model essentials, state machine,
 notifications design, authorization design, testing conventions, file layout) — read it in full
@@ -38,8 +38,8 @@ the same way Phase 1 was documented, so the next session can resume without rebu
 - **Visit cancellation**: a truck leaves the yard/queue without loading (mechanical issue, gave up,
   etc.). Will require a new `cancelled` status, a decision on which role can cancel, and UI on the
   dispatch/queue screens.
-- Notifications for `:order_issued` and `:getting_close` (when N trucks remain before the driver's
-  turn).
+- Notifications for `:order_issued` (as soon as an order is issued, regardless of resulting status —
+  distinct from `:your_turn`/`:get_ready`, which fire on entering `loading`/`getting_ready`).
 - Multiple yards/sites, in case the mining company operates more than one unit.
 - Additional language (`en`) — locale structure is already prepared, only translation is missing.
 

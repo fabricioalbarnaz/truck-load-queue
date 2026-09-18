@@ -14,7 +14,7 @@ RSpec.describe Visits::FinishLoadingService do
       expect(result.finished_at).to be_present
     end
 
-    it "promotes the next queued visit to loading and notifies that driver" do
+    it "promotes the next queued visit straight to loading when nothing was already getting ready" do
       visit = create(:visit, :loading)
       next_up = create(:visit, :queued, order_issued_at: 1.hour.ago)
 
@@ -23,6 +23,20 @@ RSpec.describe Visits::FinishLoadingService do
       }.to have_enqueued_job(SendNotificationJob).with(visit_id: next_up.id, event: "your_turn")
 
       expect(next_up.reload).to be_loading
+    end
+
+    it "promotes the getting_ready visit to loading and moves the next queued visit into getting_ready" do
+      visit = create(:visit, :loading)
+      next_up = create(:visit, :getting_ready, order_issued_at: 1.hour.ago)
+      following = create(:visit, :queued, order_issued_at: 30.minutes.ago)
+
+      expect {
+        described_class.new(visit: visit, finished_by: operator).call
+      }.to have_enqueued_job(SendNotificationJob).with(visit_id: next_up.id, event: "your_turn")
+        .and have_enqueued_job(SendNotificationJob).with(visit_id: following.id, event: "get_ready")
+
+      expect(next_up.reload).to be_loading
+      expect(following.reload).to be_getting_ready
     end
 
     it "leaves the queue untouched when there is nothing queued" do

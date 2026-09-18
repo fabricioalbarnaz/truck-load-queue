@@ -27,6 +27,29 @@
   <p>Nenhum caminhão carregando no momento.</p>
 <% end %>
 
+<h2>Prepare-se</h2>
+
+<% if @getting_ready_visit %>
+  <table>
+    <thead>
+      <tr>
+        <th>Motorista</th>
+        <th>Caminhão</th>
+        <th>Ordem</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><%= @getting_ready_visit.driver.name %></td>
+        <td><%= @getting_ready_visit.truck.plate %></td>
+        <td><%= @getting_ready_visit.order_number %></td>
+      </tr>
+    </tbody>
+  </table>
+<% else %>
+  <p>Nenhum caminhão se preparando no momento.</p>
+<% end %>
+
 <h2>Fila</h2>
 
 <table>

@@ -57,6 +57,20 @@ body:has(#public_queue) {
   font-weight: 400;
 }
 
+#public_queue .getting-ready p {
+  font-size: clamp(1.75rem, 5vw, 3.5rem);
+  font-weight: 700;
+  text-align: center;
+  margin: 0;
+  color: #f2b13c;
+}
+
+#public_queue .getting-ready p.empty {
+  color: #8b96a8;
+  font-size: clamp(1.25rem, 2.5vw, 2rem);
+  font-weight: 400;
+}
+
 #public_queue ol {
   list-style: none;
   counter-reset: queue-position;
@@ -64,6 +78,10 @@ body:has(#public_queue) {
   padding: 0;
   display: grid;
   gap: var(--space-3);
+}
+
+#public_queue ol.offset {
+  counter-reset: queue-position 1;
 }
 
 #public_queue ol li {

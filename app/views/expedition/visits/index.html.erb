@@ -47,7 +47,7 @@
         <td><%= visit.driver.name %></td>
         <td><%= visit.truck.plate %></td>
         <td><%= visit.order_number %></td>
-        <td><%= visit.loading? ? "Carregando" : "Na fila" %></td>
+        <td><%= visit.status_label %></td>
       </tr>
     <% end %>
   </tbody>

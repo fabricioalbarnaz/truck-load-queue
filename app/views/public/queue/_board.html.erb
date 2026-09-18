@@ -10,10 +10,19 @@
     <% end %>
   </section>
 
+  <section class="getting-ready">
+    <h2>Prepare-se</h2>
+    <% if getting_ready %>
+      <p><%= getting_ready.driver.name %> — <%= getting_ready.truck.plate %></p>
+    <% else %>
+      <p class="empty">Nenhum caminhão se preparando no momento.</p>
+    <% end %>
+  </section>
+
   <section>
     <h2>Próximos</h2>
     <% if queued.any? %>
-      <ol>
+      <ol class="<%= "offset" if getting_ready %>">
         <% queued.each do |visit| %>
           <li><%= visit.driver.name %> — <%= visit.truck.plate %></li>
         <% end %>

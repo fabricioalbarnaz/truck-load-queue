@@ -3,6 +3,7 @@ module QueueScreen
     def index
       authorize Visit, :finish?
       @loading_visit = policy_scope(Visit).loading.first
+      @getting_ready_visit = policy_scope(Visit).getting_ready.first
       @queue_visits = policy_scope(Visit).queued.order(:order_issued_at)
     end
 

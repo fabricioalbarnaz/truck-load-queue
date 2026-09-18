@@ -133,14 +133,14 @@ RSpec.describe Visits::CheckInService do
         expect(visit.order_issued_by).to eq(operator)
       end
 
-      it "queues the visit when another one is already loading" do
+      it "sends the visit to getting_ready when another one is already loading" do
         create(:visit, :loading)
 
         visit = described_class.new(
           driver: driver, truck: truck, checked_in_by: operator, order_number: "OC-123"
         ).call
 
-        expect(visit).to be_queued
+        expect(visit).to be_getting_ready
       end
     end
 

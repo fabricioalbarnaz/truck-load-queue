@@ -18,6 +18,7 @@ class Avo::Resources::Visit < Avo::BaseResource
     field :order_number, as: :text
     field :entered_yard_at, as: :date_time
     field :order_issued_at, as: :date_time
+    field :getting_ready_at, as: :date_time
     field :loading_started_at, as: :date_time
     field :finished_at, as: :date_time
     field :checked_in_by, as: :belongs_to

@@ -1,6 +1,6 @@
 module Api
   class BaseController < ActionController::API
-    before_action :authenticate_device!
+    # before_action :authenticate_device!
 
     private
 
